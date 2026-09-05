@@ -169,7 +169,7 @@ const CUSTOMER_MASTER = {"1001":"コスメサルーン下妻","1002":"コスメ�
    GAS連携
    デプロイ後の /exec URL に書き換えてください。
 ───────────────────────────────────────── */
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxP119mDJp19iXMM04i_fDOrkZibs3W5GCqVpqme_VEsRYBOkG2IFeaQ7D2I8rdH24R/exec'; // 例: 'https://script.google.com/macros/s/xxxxx/exec'
+const GAS_URL = ''; // 例: 'https://script.google.com/macros/s/xxxxx/exec'
 
 function gasGet(params) {
   const qs = Object.keys(params)
@@ -328,26 +328,6 @@ function esc(s) {
 ═════════════════════════════════════════════════════════ */
 function renderScanning() {
   const name = custName(ST.custCode) || '（不明な得意先）';
-  const planned = ST.plannedQty ? parseInt(ST.plannedQty, 10) : null;
-  const count = ST.items.length;
-
-  let countBlock;
-  if (planned && planned > 0) {
-    const pct = Math.min(100, Math.round((count / planned) * 100));
-    const over = count > planned;
-    countBlock = `
-      <div class="count-card">
-        <div class="count-label">読み取り済み（予定 ${planned} 本）</div>
-        <div class="count-value">${count} <span style="font-size:20px;">/ ${planned} 本</span></div>
-        <div class="count-progress"><div class="count-progress-fill ${over ? 'over' : ''}" style="width:${pct}%"></div></div>
-      </div>`;
-  } else {
-    countBlock = `
-      <div class="count-card">
-        <div class="count-label">読み取り済み</div>
-        <div class="count-value">${count} 本</div>
-      </div>`;
-  }
 
   document.getElementById('app').innerHTML = `
     <div class="slip-card">
@@ -363,11 +343,11 @@ function renderScanning() {
       <div class="scan-hint">箱の封緘シールQRを、必要な数だけ読んでください（3個箱・6個箱どちらもそのまま読めます）<br>伝票を見ながら、出す本と出さない本を確認してください</div>
     </div>
 
-    ${countBlock}
+    <div id="countBlock"></div>
 
     <div class="card">
       <div class="card-title">読み取ったロット番号</div>
-      <div class="item-list">${renderItemList()}</div>
+      <div id="itemListWrap" class="item-list"></div>
       <div class="manual-add">
         <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シール上半分の番号を直接入力できます</div>
         <div class="manual-add-row">
@@ -377,9 +357,48 @@ function renderScanning() {
       </div>
     </div>
 
-    <button class="btn-confirm" onclick="confirmShipment()" ${ST.items.length === 0 ? 'disabled style="opacity:0.5;"' : ''}>出荷確定</button>
+    <button class="btn-confirm" id="confirmBtn" onclick="confirmShipment()">出荷確定</button>
     <button class="btn-reset" onclick="resetAll()">🔄 最初からやり直す</button>
   `;
+  updateScanningDynamic();
+}
+
+/* カメラのプレビュー（#reader）とスキャン開始ボタンには一切触れず、
+   件数・一覧・確定ボタンの状態だけを差し替える。
+   これを呼ぶだけならカメラは動いたままなので、1本読むたびに
+   「スキャン開始」を押し直す必要がなくなる。 */
+function updateScanningDynamic() {
+  const planned = ST.plannedQty ? parseInt(ST.plannedQty, 10) : null;
+  const count = ST.items.length;
+
+  const countEl = document.getElementById('countBlock');
+  if (countEl) {
+    if (planned && planned > 0) {
+      const pct = Math.min(100, Math.round((count / planned) * 100));
+      const over = count > planned;
+      countEl.innerHTML = `
+        <div class="count-card">
+          <div class="count-label">読み取り済み（予定 ${planned} 本）</div>
+          <div class="count-value">${count} <span style="font-size:20px;">/ ${planned} 本</span></div>
+          <div class="count-progress"><div class="count-progress-fill ${over ? 'over' : ''}" style="width:${pct}%"></div></div>
+        </div>`;
+    } else {
+      countEl.innerHTML = `
+        <div class="count-card">
+          <div class="count-label">読み取り済み</div>
+          <div class="count-value">${count} 本</div>
+        </div>`;
+    }
+  }
+
+  const listEl = document.getElementById('itemListWrap');
+  if (listEl) listEl.innerHTML = renderItemList();
+
+  const btn = document.getElementById('confirmBtn');
+  if (btn) {
+    btn.disabled = count === 0;
+    btn.style.opacity = count === 0 ? '0.5' : '1';
+  }
 }
 
 /* 一覧が長くなりすぎると読みにくいので、直近8件だけ広げて表示し、
@@ -389,7 +408,7 @@ const RECENT_COUNT = 8;
 
 function toggleItemsExpanded() {
   itemsExpanded = !itemsExpanded;
-  renderScanning();
+  updateScanningDynamic();
 }
 
 function renderItemList() {
@@ -422,7 +441,8 @@ function renderItemRow(it, i) {
     </div>`;
 }
 
-function backToEntry() {
+async function backToEntry() {
+  await stopScanning();
   ST.stage = 'entry';
   saveState();
   renderEntry();
@@ -431,7 +451,7 @@ function backToEntry() {
 function removeItem(i) {
   ST.items.splice(i, 1);
   saveState();
-  renderScanning();
+  updateScanningDynamic();
 }
 
 function addManual() {
@@ -439,7 +459,8 @@ function addManual() {
   const num = el.value.trim();
   if (!num) return;
   addProductNumber(num, [num]);
-  renderScanning();
+  el.value = '';
+  updateScanningDynamic();
 }
 
 /* 箱QR（BOX:000925,000926,000927）または単体番号を受け取り、重複を避けて追加する */
@@ -516,7 +537,7 @@ function handleScannedCode(raw) {
   } else {
     setFeedback('ok');
   }
-  renderScanning();
+  updateScanningDynamic();
 }
 
 function onScanSuccess(decodedText) {
@@ -731,7 +752,8 @@ function showModal(title, msg) {
 }
 function closeModal() { document.getElementById('modal').innerHTML = ''; }
 
-function resetAll() {
+async function resetAll() {
+  await stopScanning();
   clearState();
   renderEntry();
 }
