@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<!--
+================================================================
+  出荷紐付けシステム（check_shipping.html）
+
+  ★★★ このファイルを直したら、APP_VERSION も必ず新しくすること ★★★
+  中ほどの APP_VERSION の行（Ctrl+Fで検索）の日付/番号を変えること。
+  変え忘れると、現場のDIGNOは古い版のまま使われ続けます。
+
+  この画面がやること：
+  ① 店番号を手入力する（打つと、その場で店名が表示される）
+     （店番号を打つと、その場で店名が表示される。通信は不要）
+  ② 箱の封緘シールQRを、伝票を見ながら必要なだけ読み込む（3個箱・6個箱どちらも同じ操作）
+  ③「出荷確定」を押すと、そのときだけGASへ問い合わせて
+     二重出荷でないかを確認し、Googleスプレッドシートに記録する
+
+  アラジン側の改修は一切不要。得意先マスタはこのファイルの中に
+  そのまま埋め込んである（得意先566件＋別送先104件＝670件）。得意先が増減したら、下の
+  CUSTOMER_MASTER をエクスポートし直して丸ごと置き換えるだけでよい。
+================================================================
+-->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>出荷紐付け</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --navy: #1a5276; --navy-light: #4a90c2; --navy-pale: #e6f1fb;
+    --green: #2d6a4f; --green-light: #52b788; --green-pale: #d8f3dc;
+    --red: #c1121f; --red-pale: #ffe8e8; --orange: #e76f00;
+    --bg: #f4f1eb; --surface: #ffffff; --text: #1a1a1a; --muted: #888; --border: #e0dbd0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: var(--bg); min-height: 100vh; padding: 16px; }
+  .header { text-align: center; margin-bottom: 16px; }
+  .header-brand { font-size: 11px; letter-spacing: 0.2em; color: var(--muted); margin-bottom: 4px; }
+  .header-title { font-size: 18px; font-weight: 700; color: var(--navy); }
+  .header-ver { font-size: 10px; color: var(--muted); margin-top: 3px; font-family: monospace; }
+
+  .card { background: var(--surface); border-radius: 14px; padding: 16px; border: 1px solid var(--border); margin-bottom: 16px; }
+  .card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.15em; color: var(--muted); margin-bottom: 12px; }
+
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: block; font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+  .field input {
+    width: 100%; padding: 13px 12px; font-size: 16px; border-radius: 10px;
+    border: 1.5px solid var(--border); -webkit-appearance: none; background: var(--surface);
+  }
+  .field input:focus { outline: none; border-color: var(--navy-light); }
+  .field .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .lookup-result { margin-top: 10px; border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  .lookup-result.hit { background: var(--green-pale); border: 1.5px solid var(--green-light); color: var(--green); }
+  .lookup-result.miss { background: var(--red-pale); border: 1.5px solid var(--red); color: var(--red); }
+  .lookup-result .name { font-size: 17px; font-weight: 900; }
+  .lookup-result .sub { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+
+  .btn-primary { width: 100%; padding: 16px; background: var(--navy); border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700; color: white; cursor: pointer; -webkit-appearance: none; }
+  .btn-primary:disabled { background: #c9c4b8; }
+  .btn-scan { width: 100%; padding: 16px; background: var(--green); border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700; color: white; cursor: pointer; -webkit-appearance: none; }
+  .btn-scan.stop { background: var(--muted); }
+  .btn-confirm { width: 100%; padding: 18px; background: var(--green); border: none; border-radius: 14px;
+    font-size: 17px; font-weight: 700; color: white; cursor: pointer; margin-bottom: 8px; letter-spacing: 0.05em;
+    -webkit-appearance: none; }
+  .btn-reset { width: 100%; padding: 14px; background: var(--surface); border: 2px solid var(--border);
+    border-radius: 12px; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer;
+    margin-bottom: 8px; -webkit-appearance: none; }
+  .btn-text { background: none; border: none; color: var(--navy); font-size: 12px; text-decoration: underline;
+    cursor: pointer; padding: 6px; }
+
+  #reader { width: 100%; max-width: 380px; margin: 0 auto 12px; border-radius: 10px; overflow: hidden; }
+  #reader.hidden { display: none; }
+  .scan-hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; line-height: 1.5; }
+
+  .slip-card { background: var(--navy); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; }
+  .slip-name { font-size: 17px; font-weight: 900; color: white; }
+  .slip-sub { font-size: 12px; color: rgba(255,255,255,0.75); margin-top: 4px; line-height: 1.6; }
+  .slip-edit { color: rgba(255,255,255,0.8); font-size: 11px; text-decoration: underline; cursor: pointer;
+    float: right; }
+
+  .count-card { background: var(--green-pale); border-radius: 14px; padding: 16px; border: 1.5px solid var(--green-light);
+    margin-bottom: 16px; text-align: center; }
+  .count-label { font-size: 11px; font-weight: 700; color: var(--green); letter-spacing: 0.1em; margin-bottom: 4px; }
+  .count-value { font-size: 40px; font-weight: 900; color: var(--green); font-family: monospace; }
+  .count-progress { height: 8px; background: rgba(0,0,0,0.08); border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  .count-progress-fill { height: 100%; background: var(--green); border-radius: 99px; transition: width 0.3s ease; }
+  .count-progress-fill.over { background: var(--red); }
+
+  .collapsed-summary { text-align: center; color: var(--muted); font-size: 12px; padding: 10px;
+    background: var(--bg); border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+  .collapsed-summary b { color: var(--navy); }
+
+  .qty-field-row { display: flex; align-items: center; gap: 8px; }
+  .qty-field-row input { flex: 1; }
+
+  .item-list { display: flex; flex-direction: column; gap: 6px; }
+  .item-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg);
+    border-radius: 8px; border: 1.5px solid var(--border); font-size: 13px; }
+  .item-row .num { flex: 1; font-family: monospace; font-weight: 700; color: var(--text); }
+  .item-row .box { font-size: 10px; color: var(--muted); }
+  .item-row .del { color: var(--red); font-size: 18px; font-weight: 900; cursor: pointer; padding: 0 4px; }
+  .empty-list { text-align: center; color: var(--muted); font-size: 13px; padding: 16px; }
+
+  .result-card { border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 16px;
+    animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  .result-card.ok { background: var(--green); color: white; }
+  .result-card.error { background: var(--red); color: white; }
+  .result-icon { font-size: 52px; margin-bottom: 10px; display: block; }
+  .result-title { font-size: 24px; font-weight: 900; margin-bottom: 6px; }
+  .result-msg { font-size: 14px; opacity: 0.9; margin-top: 8px; line-height: 1.6; }
+
+  .manual-add { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
+  .manual-add-row { display: flex; gap: 8px; }
+  .manual-add-row input { flex: 1; }
+  .manual-add-row button { padding: 0 16px; background: var(--navy); color: white; border: none; border-radius: 8px;
+    font-size: 13px; font-weight: 700; }
+
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: white; border-radius: 16px; padding: 24px; margin: 16px; text-align: center; max-width: 320px; width: 100%; }
+  .modal-icon { font-size: 48px; margin-bottom: 12px; }
+  .modal-title { font-size: 18px; font-weight: 900; color: var(--orange); margin-bottom: 8px; }
+  .modal-msg { font-size: 14px; color: var(--text); line-height: 1.6; margin-bottom: 20px; text-align: left; }
+  .modal-btn { width: 100%; padding: 14px; background: var(--orange); border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 700; color: white; cursor: pointer; }
+  .dup-item { font-family: monospace; background: var(--red-pale); color: var(--red); padding: 4px 8px;
+    border-radius: 6px; margin: 3px 0; font-size: 13px; }
+
+  #flash { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 50; opacity: 0; }
+  #flash.ok  { animation: flashGreen 0.45s forwards; }
+  #flash.err { animation: flashRed   0.45s forwards; }
+  @keyframes flashGreen { 0% { opacity: 1; background: rgba(82, 183, 136, 0.40); } 100% { opacity: 0; } }
+  @keyframes flashRed   { 0% { opacity: 1; background: rgba(193, 18, 31, 0.40); } 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-brand">オパール化粧品</div>
+  <div class="header-title">出荷紐付け</div>
+  <div class="header-ver" id="appVer"></div>
+</div>
+
+<div id="app"></div>
+<div id="modal"></div>
+<div id="flash"></div>
+
+<script>
+/* ═════════════════════════════════════════════════════════
+   得意先マスタ（店番号 → 店名）
+   得意先マスタ一覧表問合せ.xlsx の「得意先」シート（566件）と
+   「納品先（別送先）」シート（104件）を合わせて自動生成（合計670件、コードは5桁）。
+   得意先・別送先が増減したら、この行を新しいエクスポートで丸ごと置き換える。
+═════════════════════════════════════════════════════════ */
+const CUSTOMER_MASTER = {"1001":"コスメサルーン下妻","1002":"コスメチック下妻","1003":"エクサンプロヴァンス","1004":"エステサロン　Rei","3001":"アカシヤ","4002":"ゆたかや化粧品店","4005":"尾坂化粧品店","4007":"有本化粧品店","4009":"盛田文雅堂","4010":"梶川化粧品店","4011":"大原化粧品店","4012":"つるだや","4013":"森田洋品店","4016":"ローズ化粧品店","4020":"つたや化粧品店","4021":"なだや商店","4022":"チャームレディス雅","4023":"はなびし","4024":"はっぴいらんどつぼみ","4025":"ありとう洋品店","4027":"ナラ化粧品店楢柴多紀子","4035":"井尾化粧品店","4036":"バーバープラスワン","4038":"㈲ツインズ","4039":"みどり美容室","4040":"石田　忍","4041":"㈱ウェルネス湖北","4042":"モナミ美容室","4043":"イシトビ石飛三重子","4044":"とんぼや","4046":"コスメティック都雅","4047":"べっぴんはうす　ユキ","5001":"大西化粧品店","5002":"笠井方円堂","5005":"佐野化粧品店","5006":"白井化粧品店","5008":"妹尾化粧品店","5009":"株式会社　SENKOYA","5011":"ナガエ化粧品店","5013":"ひらた化粧品店","5014":"スミレヤ化粧品店","5015":"宮井化粧品店","5016":"㈲村井百貨センター","5017":"八木化粧品店","5018":"ビューティ＆ヘルス　よこかわ","5021":"レディスかわにし","5022":"サロン　ド　エス","6001":"井川本店","6004":"チェリー化粧品店","6010":"鎌倉商店","6011":"ツルダ化粧品店","6015":"株式会社 ひかりや","7001":"島崎滋美　(ヤナギヤ）","7002":"チドリヤ化粧品","7005":"片岡　百代","7006":"つばきや","7007":"ひこばえ薬局","7013":"山崎化粧品","7016":"マサヤ","7017":"こばし化粧品店","7020":"浜田化粧品店","7022":"コーベリヤ","7024":"マルミ化粧品店","7025":"㈲八木装粧品","7027":"やました","7029":"山本化粧品店","7031":"シーズ","7032":"尾崎本店","7034":"ヒロタ化粧品店","7035":"西田屋薬局","7037":"なかひら化粧品店","9990":"架空得意先１","10003":"中里薬局","10009":"はるみショップ東山洋子","10010":"エステリア企画","10011":"Lyvolvant","10012":"㈱ボスポラス","10013":"きねや化粧品店","10019":"大阪屋化粧品店","10023":"松葉屋化粧品店","10025":"あいはら化粧品店","10028":"いずみ化粧品店","10033":"いせ川化粧品店","10034":"おしゃれの店　高橋","10035":"伸生堂","10037":"ひのや化粧品店","10042":"㈲坂本商店","10047":"河合文子","10049":"株式会社　若松","10064":"ミヤノ薬局","10068":"堀野薬局","10069":"㈱尚美堂","10077":"松葉屋　高円寺店","10082":"エーケー有馬薬局","10088":"Dress Code","10092":"河原淳治","10095":"河崎明","10101":"㈲みしんや野平商店","10104":"いさみや","10107":"まるぶん化粧品店","10108":"クリスタルカンパニー島田玲子","10110":"カガヤ化粧品店","10117":"Ｌａ・Ｒｏｎｄｉｎｅ","10123":"アンシャンテ","10124":"たかなし化粧品店","10125":"株式会社　だいのみせ長谷川商店","10126":"㈱シバＤＡＩＫＯＫＵＹＡ","10127":"ハタノヤ化粧品店","10128":"田山化粧品店","10131":"クリーフ","10135":"うがい薬局","10136":"ふじや　加藤真澄","10137":"まるや化粧品店","10140":"内外薬局","10143":"細川直子","10146":"ハマ薬局","10149":"有限会社志ら菊","10150":"ＴＡＳＨＩＲＯ物流部","10151":"株式会社　アイスタイルリテール","10158":"THE COSMETIC TERRACE TASHIRO","10174":"万福屋","10178":"ジュン美容室","10183":"大滝商店","10184":"ゆあ～こまくさ","10188":"ユートピア美容室","10189":"㈱パール白百合","10190":"コスメティックス　シミズ","10192":"あぜがみ薬局","10196":"中野節子","10199":"田立屋","10202":"ビューティー　アトリエ　エコー","10220":"ゆかり","10222":"あなたを美しくする店ハラダヤ","10225":"新美堂","10226":"絵梨邑","10230":"marutajoy on the 3rd","10234":"㈱さくら屋","10235":"タカハシプランニングＳ","10236":"美容室マ・ベール","10237":"フランス屋　森の朝　湘南","10240":"Dr.KURATA","10242":"蓮華","10243":"Beauty salon AIRI","10244":"フランス屋 森の朝　Ros'e","10246":"エステサロン麗未","10248":"モンスリール麻布十番","10249":"フランス屋　森の朝　iiasa","10250":"TASHIRO東急プラザ蒲田店","10251":"フランス屋　森の朝レイクタウン","11099":"SP　現売（ロゼ）","14000":"㈱舘野商店","14001":"コスメショップヴェル","14002":"㈲こいでや","14004":"㈱ライオン堂　ｋｉ・ｒｅ・ｉ","14006":"㈲いわと","14009":"みどりやアピタ店","14011":"㈲みどりや","14012":"高橋化粧品店","14013":"田熊ダイヤモンド㈱","14016":"さくらや","14020":"三番館みどりや","14021":"はとや","14022":"むらさきや","14030":"アズマヤ","14031":"㈲ビューティショップたなか","14032":"㈲吉見屋商店","14036":"ｅｓｐｏｉｒ　草苅","14037":"ファッションハウス　シラ井","14038":"マンネンヤ","14042":"㈲草苅","14043":"ラ・ガール","14044":"㈱白牡丹","14045":"セレクトコスメショップ","14047":"㈲西川化粧品店","20001":"サロン　ド　ペルル","20002":"久喜　捷子","20003":"コスメショップ　Hiroko","20009":"大島紀子","20010":"浅野真理","20012":"金原化粧品店","20020":"みその化粧品店","20022":"木村化粧品店","20025":"コスメドＵなかしま","20026":"㈱リッツインターナショナル","20034":"ビューティアオキ","20037":"コスメティックサロン　コウダ","20042":"㈲ピュアレ","20043":"㈱むらさきや鳴子店","20052":"梅鉢化粧品店","20055":"かのけん堂化粧品店","20062":"よしかわ化粧品店","20064":"三知美容室","20065":"㈱ムラサキヤ（栄地下店）","20072":"ビュ―ティクリニック華","20074":"ビューティック　マリー","20079":"美容室　エーゲカイ","20080":"㈱むらさきや","20087":"マネキヤ化粧品店","20089":"サロンドSEIKO","20094":"浅沼栄子","20109":"ジョリエ・ミツコ","20111":"朝日薬局　豊田市駅店","20113":"おしゃれしょっぷ　しばた","20115":"合資会社　双葉屋","20119":"㈱くわこやパルファン本部","20127":"㈱みどりや","20128":"ハヤノ","20132":"さかえや化粧品店","20134":"サロンドビューティマミ","20135":"山中章代","20137":"石川智子","20138":"美容室MeRci","20141":"パルファンららぽーと愛知東郷店","21000":"吉田商会","21002":"㈱清水屋","21004":"㈲BIG Eつたや","21005":"鈴屋化粧品店","21009":"ミネ薬局","21011":"ひまわり化粧品店","21012":"石田化粧品店","21018":"すぎやま薬品","21019":"しき化粧品店","21020":"スズキ薬局","21026":"サカエヤ化粧品店","21027":"ダルマヤ","21028":"キリヤ薬品","21030":"シオサカ薬局","21041":"のばら化粧品店","21043":"丸久化粧品店","21045":"いけがや化粧品店","21046":"岩本化粧品店","21055":"わかくさ化粧品店","21057":"柳屋化粧品店","21059":"トウカネ化粧品店","21060":"化粧品のさとう","21061":"はせべ","21062":"こまくにや化粧品店","21064":"イシカワ化粧品店","21066":"チャム化粧品店","21068":"１２５むらかみ","21070":"㈱マサモリ","21073":"久野屋化粧品店","21074":"化粧品のきぶね","21075":"やまだ化粧品店","21078":"こんぶや","21080":"朝内化粧品店","21081":"島田漢方堂","21089":"浦化粧品店","21090":"吉田商会　磐田営業所","21094":"水白化粧品店","21095":"たんぱ薬局","21100":"三浦薬局","21103":"ビューティハウス　イカリ","21105":"船越薬局","21106":"おしゃれチェ－ン　マルヤマ","21108":"ＶｉＶＩサカエヤ","21109":"岸山化粧品店","21111":"田中洋品店","21115":"㈲富屋商店","21116":"ウエマツ薬舗","21117":"化粧品の和光","21120":"京屋薬局","21121":"ＩＮＤＥＸ　メイ・ワン店","21122":"影山薬局","21123":"大池化粧品店","21124":"わかくさ薬品","21125":"REBIRTH  浜北店","21126":"コスメティックスおおしば","21127":"菊屋化粧品店","21130":"オリゾン吉永","21131":"あぶさい化粧品店","21132":"マルヤマ　サンヨネ店","21133":"La beaute TAKAHASHI","21134":"リバースららぽーと磐田店","24000":"奥川本店","24006":"オレンジファーマシー","29099":"サロンのお客様","30005":"フェイシャルラボ　ユノ","30006":"くずは美顔教室","30008":"おしゃれショップ　せがわ","30009":"サカ化粧品店","30011":"河合美智子","30012":"サロンドボ―テヨシコ","30013":"㈲太田化粧品店","30019":"橘屋化粧品店","30022":"なわて美容室","30031":"和幸","30040":"エステサロンキロリ　松本","30042":"マーガレット","30047":"ミフネ化粧品店","30050":"ベニヤ化粧品店","30051":"おしゃれハウス　カイ","30056":"ギャラリー有楽","30064":"白十字薬局","30074":"ミキヤ化粧品店","30075":"森本美容室","30076":"みさ化粧品店","30078":"ビューティアンドヘルシーふじた","30079":"化粧品のマツウラ","30089":"佐藤久美子","30091":"ヒデ美容室","30096":"佐和","30106":"シャレード","30111":"生駒美恵子","30116":"ひさ美容室","30123":"高木京子","30130":"マスノ","30132":"左り馬化粧品店","30139":"みどりや","30145":"ビューティーケア　つかもと","30146":"ヤマダ仙寿堂","30147":"オリオン","30148":"㈱ヒラマツ","30201":"コスメティックハウス　まつや","30202":"佐古商店","30208":"サロン　ド　リス","30210":"㈱かもじや","30211":"薬局ヘルシーピットＢＲＡＶＥＳ","30212":"エステすみとも（住友富美子）","30213":"ミナカイ・フローラ","30214":"㈲ウエムラ","30215":"エステドールヤスコ・オオハラ","30216":"キタバ　ロゼ店","30217":"レヴェラーズ","30218":"㈱ヤマグチメープル","30219":"㈱西本薬局","30220":"＠コスメストア　ツタヤ戎橋店","30221":"化粧品の店　タケヤ","30222":"おしゃれ工房　マツモト","30225":"井谷化粧品店","30226":"美容室　ＫＩＲＩ","30227":"Eau de ki -Japan Office-","30229":"HAIR&EYELASH AND.","37000":"㈱PALTAC RDC近畿","37004":"松坂屋","37006":"㈱共栄ファーマシー","37007":"㈱PALTAC RDC堺","40003":"藤本　由紀子","40005":"ビューティクリニック・ミスミ","40006":"吉原小間物店","40009":"徳本昌子","40012":"㈲コスメガーデンＴＡＫＥＮＯ","40014":"㈱紅屋　本店","40016":"おしゃれ館ベニヤ","40018":"オパール山口堂","40019":"㈲サンビ","40026":"はとの店","40031":"コスメティック・エトワ－ル","40032":"MARUSHIN","40050":"河内化粧品店ザ・ビッグ小郡店","40051":"くすりのビビ","40101":"みす化粧品店","40103":"三天堂","40109":"川村信子","40110":"山手妙子","40114":"すたら薬局","40116":"吉崎化粧品店","40119":"瓜生化粧品店","40132":"五郎丸　巴","40139":"京屋化粧品店","40145":"ビューティー＆ヘルス　わたなべ","40146":"コスメルームあろあろ","53000":"㈱田窪商店","53001":"紫水化粧品店","53002":"おしゃれ・はうす　モコ","53005":"錦屋","53006":"キクヤ化粧品店","53007":"ひまわり本店","53009":"㈲柳屋化粧品店","53011":"西山薬局","53012":"乃万化粧品店","53013":"三峰","53016":"おしゃれブティックみずもと","53018":"㈲びーばくれよん","53019":"松山薬局","53020":"おしゃれの店ふじい","53021":"RELAXIN'KATSURA","53022":"フジカワ銀天街本店","53023":"フジカワ南松山ジョー・プラ店","53024":"フジカワフジグラン松山店","60004":"ふじい化粧品店","60006":"エイコ美容室","60008":"古賀ミチ子","60012":"堤商店","60014":"ベビーセンター佐藤","60015":"竹本安由美","60023":"花田慎一","60028":"鴨川キヨ子","60030":"橋本史代","60032":"高山富美子コスメドFUMIKO","60036":"大賀薬局　木馬館","60037":"大賀薬局　福岡ビル店","60070":"市役所前薬局","60079":"モリ薬局","60080":"甲斐俊子","60088":"きのした化粧品店","60093":"㈱下川薬局","60098":"コンシェルジェ・ダテ","60108":"㈲丸幸","60109":"松月園化粧品コーナー","60111":"辻薬店　本店","60112":"おしゃれの店　さだかね","60113":"㈱ミズ","60114":"内田　郁代","60124":"㈱ミズ高木瀬店","60133":"株式会社KEN-ON　くすりの和漢堂","60136":"太陽堂薬局　水前寺公園店","60137":"サロン・ド・ボーテ","60138":"遠藤ヨシ子","60139":"山崎商店","60140":"ピカイチ","60142":"渕上商店","60144":"北の丸薬品㈲","60148":"ユア・シセイドウＭ","60152":"大賀薬局ライフストリーム","60153":"こばやし化粧品店","60154":"フジタ薬局","60156":"㈱キク薬舗","60157":"上原薬局","60161":"㈲ラヴィー　プレス店","60162":"㈱ミズ　兵庫店","60163":"ドラッグ大賀　博多口店","60164":"溝上薬局空港通り店","60166":"ラ・ヴィー　延岡店","60167":"アリーイオンモール直方店","60168":"MIZ本店","60169":"きりや","60170":"スキンケアハウスちどりや","70002":"森平商店","70003":"マルサン","70004":"ごとう化粧品店","70008":"オパール化粧品　オルゴール♪","70009":"秋桜","70010":"オパール化粧品　別世界","70011":"㈱花やしき","70012":"青柳化粧品店","70013":"さくら井","70014":"オパール化粧品の店　大藤","70017":"㈱ホテイヤ","70018":"コスメティックハウス　ミズノ","70020":"あげいし化粧品店","70022":"大塚薬店","70023":"河内くすりや","70024":"チャームショップ　すずき","70025":"オパール化粧品・いしだ。","70028":"竹内化粧品店","70029":"ビューティーハウス　まさみ","70030":"ジェンヌ　タツミヤ","70031":"めぐ化粧品店","70038":"おしゃれパーラー　アンドウ","70039":"ビューティショップ　ながい","70040":"おしゃれの店　丸正","70042":"㈱末広　本店","70044":"ビューティショップ　マツダ","70045":"コスメティクス　サクラヤ","70047":"Luminous.My夢","70050":"ユアシセイドウ　すずき","70052":"ラ・メール　エスパル店","70053":"ラ・メール　イオンモール天童店","70057":"山田相談薬局","70059":"化粧品の店　すぎや","70063":"ヤマリ薬局","70064":"タナカ薬局","70065":"コスメティック　アズール","70066":"コスメティックハウス　まゆみ","75001":"スキンケアハウス大野屋","75002":"ファッションパーク　すがい","75003":"アジア堂薬局","75004":"やはたや","75009":"ファッションの店クラウン","75011":"美保薬局","75013":"サトー","75014":"石田百貨店","75015":"マイ・ハート","75016":"鈴木薬舗","75017":"白河屋薬局","75020":"ぶらっくぱねる","75021":"エルブ","75022":"COSMETIC　アンジュ","75023":"化粧品のサニー","75024":"コスメティック　油屋","75025":"スキンハウス　ビオラ","75026":"㈱菊屋","75027":"富澤薬局","75028":"小川屋","75029":"化粧品の丸久","75031":"星白清堂","75032":"コスメティック　ルビー","75033":"サニーバッグ","75034":"すずや化粧品店","75035":"桂島　理智子","75036":"コスメティック　パルファン","75037":"化粧品のろくさん","75038":"栗駒商会㈱ ロンドン","75039":"リ・ボーテ","75040":"美　ＢＩＳＨＯＰ　ＥＮＤＯ","75041":"ヴォワール","75042":"（株）粧苑　すきや　一番町本店","75043":"（株）粧苑　すきや　エスパル店","75044":"（株）粧苑　すきや　セルバ店","75045":"SCORPION＆KING CRAB","80001":"三宅弘美","80002":"常原商店","80004":"㈲ひろたや","80007":"㈲ビューティ・ナカムラ","80008":"㈲小林美装店","80009":"橋本化粧品店","80011":"マルゲン化粧品店","80012":"かわかみ化粧品店","80015":"手芸工房　タカオカ","80017":"ダテ理髪店","80019":"おしゃれの店　フジイ","80021":"美恵化粧品店","80022":"㈲稲岡本店","80023":"うきよ化粧品店","80024":"岸田二美","80025":"㈱梅木商店","80026":"㈲シバタ化粧品店","80027":"㈲ベニヤ","80030":"㈱あいや","80033":"ハート薬局","80034":"理容ゼイダ","80036":"美容室ビュー","90001":"たから化粧品店","90004":"あじな中央薬品","90007":"おしゃれの店　レモン","90008":"㈱マコト屋","90009":"マコト屋　ゆめタウン店","90011":"橋本啓子","90015":"ｎｅｓｔ","90017":"羽原　千恵","90022":"かきうち化粧品店","90024":"ウエスギ薬局","90026":"チャームショップ　こんどう","90028":"村上","90030":"サンローゼ．ヤマナカ","90031":"フランス屋","90032":"おしゃれサロン　ひろや","90036":"野村　美子","90037":"コスメティックスハウスナカムラ","90038":"べっぴんはうす　フルヤ","90040":"ビューティサロン　エンゼル","90041":"山田光恵","90042":"平井化粧品店","90044":"竹国化粧品店","90045":"中むら化粧品店","90048":"いはら化粧品店","90050":"和田繁美","90051":"スミ化粧品店","90053":"ほそかわ化粧品店","90055":"ドラッグ　いこま","90057":"マミー化粧品店","90062":"パール化粧品店（坂田様宅）","90064":"高橋良子（ももや化粧品店）","90066":"ときめき　きらら","90067":"こうしげ化粧品店","90070":"マサヤ化粧品店","90081":"千粧","90082":"㈲ユウカ","90083":"赤松薬局","90085":"ナカヰ商店","90086":"コスメティック　りぼん","90087":"ピコ","90088":"森の朝ふれぐらんと","98001":"DESSIGNS社　須山 佳子","98002":"SHIBUI di Raffaella Grisa","97000":"岩本様方　佐藤恵美","97001":"瓢箪山（美顔センター太田）","97002":"赤野　ユリ子","97003":"フェイシャルラボ　くずは美顔教","97004":"フェイシャルラボ上本町教室","97005":"コスメティックハウス　マツヤ","97007":"パレット","97008":"むらさきや　アピタ三雲店","97010":"フランス屋アクア店","97011":"佐藤美保子","97012":"竹内京子","97013":"長谷川和子","97014":"キク薬舗　谷山店　長谷川店長様","97015":"煙草ショップ　大野屋","97016":"下妻ビル１Ｆ　管理人気付","97022":"中村マツ子","97023":"久野屋","97025":"かもじや　ペントモール店","97026":"垣内滋祥","97027":"下妻本店","97031":"生田堂","97032":"かもじや　アリオ八尾店","97036":"コスメサルーン下妻","97037":"Ｇａｒｃ，ｏｎｎｅ","97042":"（株）フランス屋ライブラリー","97043":"いさみやペリエ千葉１Ｆ店","97044":"フランス屋きらら店","97046":"フランス屋森の朝店","97047":"鎌倉ダルマ薬局","97048":"ラ・セサミ　おのだサンパーク店","97049":"きれい倶楽部","97050":"むらさきや　パワーセンター店","97053":"赤水淑子　（自宅）","97054":"Ｄｒｅｓｓ　Ｃｏｄｅ","97055":"たしろジョイナス店","97056":"ザ コスメティックテラス タシロ","97057":"Ｂｌｕｅ　Ｓｔｒｉｐｅ","97058":"高島屋薬品部","97061":"キャビン","97062":"Ｈ・Ａ・Ｐ・Ｉ・Ｔ・Ａ　鉾田店","97063":"アットコスメストア上野マルイ店","97064":"小塚博太郎","97065":"有限会社ミナカイ","97066":"フランス屋 森の朝 水辺","97067":"森の朝　ＷＩＮＥＲＹ","97076":"新美堂駅前店","97078":"みどりやイオン名古屋東店","97079":"みどりやクレオ店","97080":"シャンテフィールコムタウン店","97081":"シャンテウイングタウン店","97083":"ムラサキヤセントラルパーク店","97084":"コスメ　ドルチェ※","97085":"むらさきやベルタウン店","97086":"中島　孝","97087":"ムラサキヤユニモール店","97088":"ムラサキヤサカエチカ店","97089":"（株）ウェルネス物流センター","97091":"田中清嗣","97093":"アットコスメストアルミネ有楽町","97094":"プランタン銀座商品流通センター","97095":"とんぼや","97096":"パルファンガーデン名古屋みなと","97097":"中原奈津子","97098":"たやま化粧品店　安房店","97099":"ＳＡＫＵＲＡＹＡ　ＦＯＲ　ＭＥ","97100":"化粧品のマツウラ　フローラ８８","97102":"ジュールフランス屋","97103":"いろや藤棚店","97104":"いろや港南台店","97105":"美容室セレス","97106":"アットコスメストア　ルミネ池袋","97107":"瀬川朱美","97108":"山本化粧品店","97109":"シーズ","97111":"あおば中央薬局","97112":"さつき中央薬品","97113":"だいのみせ　サンピア店","97114":"パルファン・イオン八事店","97115":"コスメスイッチ　サカエヤ","97116":"竹山　博英","97118":"フジカワ南松山ジョー・プラ店","97119":"コスメ＆ネイル　ミカサヤ川西","97121":"竹内　京子","97125":"セレスしぶや　上新田店","97126":"佐藤　美保子","97127":"ﾋｺﾊﾞｴ ｺｽﾒﾃｨｯｸ & ｳｪｱ","97128":"ミキヤ　パティオ店","97130":"シーオス株式会社　川崎事業所","97131":"原田禮子","97132":"かもじや　ＬＩＮＯＡＳ店","97133":"米山　きみ恵","97135":"佐藤　ゆかり","97136":"コスメティックスサカエヤ","97138":"パルファン・アクルス店","97139":"図司敦子","97140":"片岡　百代（自宅）","97141":"株式会社リクサス物流センター","97142":"佐藤順子","97143":"宮井　延哲","97144":"美容室エーゲカイ","97145":"平井 五恵","97146":"五十嵐 ミサ子","97147":"居本 みかこ","97148":"塚原 悠介"};
+
+/* ─────────────────────────────────────────
+   GAS連携
+   デプロイ後の /exec URL に書き換えてください。
+───────────────────────────────────────── */
+const GAS_URL = ''; // 例: 'https://script.google.com/macros/s/xxxxx/exec'
+
+function gasGet(params) {
+  const qs = Object.keys(params)
+    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k] === undefined || params[k] === null ? '' : params[k]))
+    .join('&');
+  return fetch(GAS_URL + '?' + qs).then(r => r.json());
+}
+
+/* ─────────────────────────────────────────
+   状態（localStorageに保存。ページを閉じても続きから再開できる）
+───────────────────────────────────────── */
+function loadState() {
+  return {
+    custCode: localStorage.getItem('ship_custCode') || '',
+    plannedQty: localStorage.getItem('ship_plannedQty') || '',
+    items:    JSON.parse(localStorage.getItem('ship_items') || '[]'),
+    stage:    localStorage.getItem('ship_stage')    || 'entry'  // 'entry' | 'scanning'
+  };
+}
+let ST = loadState();
+let itemsExpanded = false; // 一覧を全件表示しているか（大量出荷時の折りたたみ用。保存しない）
+
+function saveState() {
+  localStorage.setItem('ship_custCode', ST.custCode);
+  localStorage.setItem('ship_plannedQty', ST.plannedQty || '');
+  localStorage.setItem('ship_items', JSON.stringify(ST.items));
+  localStorage.setItem('ship_stage', ST.stage);
+}
+function clearState() {
+  ['ship_custCode','ship_plannedQty','ship_items','ship_stage'].forEach(k => localStorage.removeItem(k));
+  ST = { custCode: '', plannedQty: '', items: [], stage: 'entry' };
+  itemsExpanded = false;
+}
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+function custName(code) {
+  return CUSTOMER_MASTER[String(code).trim()] || null;
+}
+
+/* ─────────────────────────────────────────
+   効果音（Web Audio API）
+───────────────────────────────────────── */
+let _actx = null;
+function getAudioCtx() {
+  if (!_actx) { try { _actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+  return _actx;
+}
+async function resumeCtx(ctx) { if (ctx && ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) {} } }
+function beep(ctx, {freq, duration, type = 'sine', gain = 0.3, delay = 0}) {
+  const osc = ctx.createOscillator(); const g = ctx.createGain();
+  osc.type = type; osc.frequency.value = freq; g.gain.value = gain;
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(ctx.currentTime + delay); osc.stop(ctx.currentTime + delay + duration);
+}
+async function playOkSound() {
+  const ctx = getAudioCtx(); if (!ctx) return; await resumeCtx(ctx);
+  try { beep(ctx, {freq: 880, duration: 0.12, gain: 0.25}); beep(ctx, {freq: 1320, duration: 0.15, gain: 0.25, delay: 0.12}); } catch (e) {}
+}
+async function playNgSound() {
+  const ctx = getAudioCtx(); if (!ctx) return; await resumeCtx(ctx);
+  try { beep(ctx, {freq: 160, duration: 0.35, type: 'sawtooth', gain: 0.3}); } catch (e) {}
+}
+async function playAlreadySound() {
+  const ctx = getAudioCtx(); if (!ctx) return; await resumeCtx(ctx);
+  try { beep(ctx, {freq: 600, duration: 0.15, type: 'sine', gain: 0.15}); } catch (e) {}
+}
+async function playCompleteSound() {
+  const ctx = getAudioCtx(); if (!ctx) return; await resumeCtx(ctx);
+  try {
+    beep(ctx, {freq: 523.25, duration: 0.14, type: 'triangle', gain: 0.22, delay: 0});
+    beep(ctx, {freq: 659.25, duration: 0.14, type: 'triangle', gain: 0.22, delay: 0.14});
+    beep(ctx, {freq: 783.99, duration: 0.14, type: 'triangle', gain: 0.22, delay: 0.28});
+    beep(ctx, {freq: 1046.5, duration: 0.45, type: 'triangle', gain: 0.28, delay: 0.42});
+  } catch (e) {}
+}
+function setFeedback(type) {
+  localStorage.setItem('ship_fb', type);
+  if (type === 'ng') playNgSound();
+  else if (type === 'already') playAlreadySound();
+  else if (type === 'complete') playCompleteSound();
+  else playOkSound();
+}
+window.addEventListener('load', function () {
+  const fb = localStorage.getItem('ship_fb');
+  if (!fb) return;
+  localStorage.removeItem('ship_fb');
+  const el = document.getElementById('flash');
+  if (!el) return;
+  el.className = '';
+  void el.offsetWidth;
+  el.className = (fb === 'ok' || fb === 'complete' || fb === 'already') ? 'ok' : 'err';
+});
+
+/* ═════════════════════════════════════════════════════════
+   画面①：店番号の入力
+═════════════════════════════════════════════════════════ */
+function renderEntry() {
+  document.getElementById('app').innerHTML = `
+    <div class="card">
+      <div class="card-title">店番号を入力</div>
+      <div class="field">
+        <label>店番号</label>
+        <input id="inCustCode" type="text" inputmode="numeric" placeholder="例：90031" value="${esc(ST.custCode)}" maxlength="5" autofocus>
+        <div class="hint">出荷伝票の「得意先コード」欄に書かれている番号です</div>
+        <div id="lookupBox"></div>
+      </div>
+      <div class="field">
+        <label>予定数（省略可）</label>
+        <input id="inPlannedQty" type="text" inputmode="numeric" placeholder="例：300" value="${esc(ST.plannedQty)}" maxlength="5">
+        <div class="hint">セールなど大量出荷のときに入力すると、読み忘れ・数え間違いに気づきやすくなります。<br>数本程度の通常出荷では空欄のままで構いません。</div>
+      </div>
+    </div>
+    <button class="btn-primary" id="btnNext" disabled>箱の読み取りへ進む</button>
+  `;
+  const codeEl = document.getElementById('inCustCode');
+  const qtyEl = document.getElementById('inPlannedQty');
+  const btn = document.getElementById('btnNext');
+
+  qtyEl.addEventListener('input', () => { ST.plannedQty = qtyEl.value.trim(); });
+
+  function refreshLookup() {
+    const code = codeEl.value.trim();
+    ST.custCode = code;
+    const box = document.getElementById('lookupBox');
+    if (!code) { box.innerHTML = ''; btn.disabled = true; return; }
+    const name = custName(code);
+    if (name) {
+      box.innerHTML = `<div class="lookup-result hit"><div class="name">${esc(name)}</div><div class="sub">店番号 ${esc(code)}</div></div>`;
+      btn.disabled = false;
+    } else {
+      box.innerHTML = `<div class="lookup-result miss">この店番号はマスタに見つかりません<div class="sub">番号を確認してください</div></div>`;
+      btn.disabled = true;
+    }
+  }
+  codeEl.addEventListener('input', refreshLookup);
+  refreshLookup();
+
+  btn.onclick = function () {
+    ST.custCode = codeEl.value.trim();
+    ST.plannedQty = qtyEl.value.trim();
+    ST.stage = 'scanning';
+    saveState();
+    renderScanning();
+  };
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ═════════════════════════════════════════════════════════
+   画面②：箱QRのスキャン（3個箱・6個箱共通）
+═════════════════════════════════════════════════════════ */
+function renderScanning() {
+  const name = custName(ST.custCode) || '（不明な得意先）';
+  const planned = ST.plannedQty ? parseInt(ST.plannedQty, 10) : null;
+  const count = ST.items.length;
+
+  let countBlock;
+  if (planned && planned > 0) {
+    const pct = Math.min(100, Math.round((count / planned) * 100));
+    const over = count > planned;
+    countBlock = `
+      <div class="count-card">
+        <div class="count-label">読み取り済み（予定 ${planned} 本）</div>
+        <div class="count-value">${count} <span style="font-size:20px;">/ ${planned} 本</span></div>
+        <div class="count-progress"><div class="count-progress-fill ${over ? 'over' : ''}" style="width:${pct}%"></div></div>
+      </div>`;
+  } else {
+    countBlock = `
+      <div class="count-card">
+        <div class="count-label">読み取り済み</div>
+        <div class="count-value">${count} 本</div>
+      </div>`;
+  }
+
+  document.getElementById('app').innerHTML = `
+    <div class="slip-card">
+      <span class="slip-edit" onclick="backToEntry()">内容を修正</span>
+      <div class="slip-name">${esc(name)}</div>
+      <div class="slip-sub">店番号 ${esc(ST.custCode)}　／　出荷日 ${esc(todayStr())}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">QRスキャナー</div>
+      <div id="reader" class="hidden"></div>
+      <button id="scanToggleBtn" class="btn-scan" onclick="toggleScanning()">📷 スキャン開始</button>
+      <div class="scan-hint">箱の封緘シールQRを、必要な数だけ読んでください（3個箱・6個箱どちらもそのまま読めます）<br>伝票を見ながら、出す本と出さない本を確認してください</div>
+    </div>
+
+    ${countBlock}
+
+    <div class="card">
+      <div class="card-title">読み取ったロット番号</div>
+      <div class="item-list">${renderItemList()}</div>
+      <div class="manual-add">
+        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シール上半分の番号を直接入力できます</div>
+        <div class="manual-add-row">
+          <input id="manualNum" type="text" inputmode="numeric" placeholder="例：000925" maxlength="6">
+          <button onclick="addManual()">追加</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-confirm" onclick="confirmShipment()" ${ST.items.length === 0 ? 'disabled style="opacity:0.5;"' : ''}>出荷確定</button>
+    <button class="btn-reset" onclick="resetAll()">🔄 最初からやり直す</button>
+  `;
+}
+
+/* 一覧が長くなりすぎると読みにくいので、直近8件だけ広げて表示し、
+   それより前はまとめて折りたたむ（大量出荷対策）。全件表示に切り替え可能。 */
+const COLLAPSE_THRESHOLD = 12;
+const RECENT_COUNT = 8;
+
+function toggleItemsExpanded() {
+  itemsExpanded = !itemsExpanded;
+  renderScanning();
+}
+
+function renderItemList() {
+  if (ST.items.length === 0) return `<div class="empty-list">まだ読み取っていません</div>`;
+
+  if (ST.items.length <= COLLAPSE_THRESHOLD || itemsExpanded) {
+    const summary = ST.items.length > COLLAPSE_THRESHOLD
+      ? `<div class="collapsed-summary" onclick="toggleItemsExpanded()">たたんで表示する ▲</div>`
+      : '';
+    return summary + ST.items.map((it, i) => renderItemRow(it, i)).join('');
+  }
+
+  const hiddenCount = ST.items.length - RECENT_COUNT;
+  const recent = ST.items.slice(-RECENT_COUNT);
+  const offset = ST.items.length - RECENT_COUNT;
+  return `
+    <div class="collapsed-summary" onclick="toggleItemsExpanded()">
+      他 <b>${hiddenCount}本</b>（折りたたみ中）タップして全件表示 ▼
+    </div>
+    ${recent.map((it, i) => renderItemRow(it, offset + i)).join('')}
+  `;
+}
+
+function renderItemRow(it, i) {
+  return `
+    <div class="item-row">
+      <div class="num">${esc(it.num)}</div>
+      <div class="box">同じ箱：${esc(it.box.join('/'))}</div>
+      <div class="del" onclick="removeItem(${i})">×</div>
+    </div>`;
+}
+
+function backToEntry() {
+  ST.stage = 'entry';
+  saveState();
+  renderEntry();
+}
+
+function removeItem(i) {
+  ST.items.splice(i, 1);
+  saveState();
+  renderScanning();
+}
+
+function addManual() {
+  const el = document.getElementById('manualNum');
+  const num = el.value.trim();
+  if (!num) return;
+  addProductNumber(num, [num]);
+  renderScanning();
+}
+
+/* 箱QR（BOX:000925,000926,000927）または単体番号を受け取り、重複を避けて追加する */
+function addProductNumber(num, boxGroup) {
+  if (ST.items.some(it => it.num === num)) {
+    setFeedback('already');
+    return false;
+  }
+  ST.items.push({ num: num, box: boxGroup });
+  saveState();
+  setFeedback('ok');
+  return true;
+}
+
+function parseBoxCode(raw) {
+  const m = String(raw).trim().match(/^BOX:(.+)$/i);
+  if (!m) return null;
+  const nums = m[1].split(',').map(s => s.trim()).filter(Boolean);
+  if (nums.length === 0) return null;
+  return nums;
+}
+
+/* ═════════════════════════════════════════════════════════
+   カメラスキャン（原料照合システムと同じ仕組みを流用）
+═════════════════════════════════════════════════════════ */
+let html5QrCode = null;
+let scanning = false;
+let lastScanCode = null;
+let pendingConfirmCode = null;
+let pendingConfirmCount = 0;
+const CONFIRM_THRESHOLD = 2;
+
+let lastFrameTime = Date.now();
+let isAutoRestarting = false;
+let missFrames = 0;
+const ALLOWED_MISS_FRAMES = 3;
+const QRBOX_SIZE = 250;
+const SCAN_FPS = 15;
+
+function calcQrbox(viewfinderWidth, viewfinderHeight) {
+  const shorter = Math.min(viewfinderWidth || 0, viewfinderHeight || 0);
+  let size = Math.floor(shorter * 0.8);
+  if (!size || size < 0) size = 150;
+  size = Math.min(size, QRBOX_SIZE);
+  size = Math.max(size, 120);
+  return { width: size, height: size };
+}
+
+function extractCodeFromScan(decodedText) {
+  try {
+    const url = new URL(decodedText);
+    const d = url.searchParams.get('d');
+    if (d) return d.trim();
+  } catch (e) {}
+  return decodedText.trim();
+}
+
+function handleScannedCode(raw) {
+  const boxNums = parseBoxCode(raw);
+  if (!boxNums) {
+    setFeedback('ng');
+    showModal('登録されていないQRコードです', 'この箱の封緘シールQRではありません。<br>汚れている場合は下の欄に番号を手入力してください。');
+    return;
+  }
+  let addedAny = false;
+  let allDup = true;
+  boxNums.forEach(n => {
+    const ok = addProductNumber(n, boxNums);
+    if (ok) { addedAny = true; allDup = false; }
+  });
+  if (!addedAny && !allDup) { /* no-op */ }
+  if (!addedAny) {
+    setFeedback('already');
+  } else {
+    setFeedback('ok');
+  }
+  renderScanning();
+}
+
+function onScanSuccess(decodedText) {
+  lastFrameTime = Date.now();
+  missFrames = 0;
+  const code = extractCodeFromScan(decodedText);
+  if (code === lastScanCode) { pendingConfirmCode = null; pendingConfirmCount = 0; return; }
+  if (code === pendingConfirmCode) { pendingConfirmCount++; } else { pendingConfirmCode = code; pendingConfirmCount = 1; }
+  if (pendingConfirmCount >= CONFIRM_THRESHOLD) {
+    lastScanCode = code; pendingConfirmCode = null; pendingConfirmCount = 0;
+    handleScannedCode(code);
+  }
+}
+function onScanFailure() {
+  lastFrameTime = Date.now();
+  missFrames++;
+  if (missFrames >= ALLOWED_MISS_FRAMES) { pendingConfirmCode = null; pendingConfirmCount = 0; missFrames = 0; }
+}
+
+async function toggleScanning() {
+  if (isAutoRestarting) return;
+  const ctx = getAudioCtx();
+  await resumeCtx(ctx);
+  if (scanning) { await stopScanning(); return; }
+
+  const readerEl = document.getElementById('reader');
+  const btn = document.getElementById('scanToggleBtn');
+  readerEl.classList.remove('hidden');
+
+  html5QrCode = new Html5Qrcode("reader");
+  try {
+    try {
+      await html5QrCode.start({ facingMode: "environment" }, { fps: SCAN_FPS, qrbox: calcQrbox }, onScanSuccess, onScanFailure);
+    } catch (e1) {
+      html5QrCode = new Html5Qrcode("reader");
+      await html5QrCode.start({ facingMode: "environment" }, { fps: SCAN_FPS }, onScanSuccess, onScanFailure);
+    }
+    scanning = true; lastFrameTime = Date.now(); missFrames = 0;
+    btn.textContent = '⏹ スキャン停止';
+    btn.classList.add('stop');
+    await resumeCtx(getAudioCtx());
+  } catch (err) {
+    alert('カメラを起動できませんでした。\nHTTPSのURLで開いているか、カメラの使用を許可しているか確認してください。\n\nエラー: ' + err);
+    readerEl.classList.add('hidden');
+  }
+}
+
+async function stopScanning() {
+  if (html5QrCode) { try { await html5QrCode.stop(); await html5QrCode.clear(); } catch (e) {} }
+  scanning = false; lastScanCode = null; pendingConfirmCode = null; pendingConfirmCount = 0;
+  const readerEl = document.getElementById('reader');
+  if (readerEl) readerEl.classList.add('hidden');
+  const btn = document.getElementById('scanToggleBtn');
+  if (btn) { btn.textContent = '📷 スキャン開始'; btn.classList.remove('stop'); }
+}
+
+let wasScanningBeforeHide = false;
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) {
+    wasScanningBeforeHide = scanning;
+  } else if (wasScanningBeforeHide) {
+    wasScanningBeforeHide = false;
+    try { isAutoRestarting = true; await stopScanning(); await toggleScanning(); }
+    catch (e) {} finally { isAutoRestarting = false; }
+  }
+});
+
+setInterval(async () => {
+  if (!scanning || isAutoRestarting || document.hidden) return;
+  if (Date.now() - lastFrameTime > 8000) {
+    isAutoRestarting = true;
+    try { await stopScanning(); await toggleScanning(); } catch (e) {} finally { isAutoRestarting = false; }
+  }
+}, 3000);
+
+/* ═════════════════════════════════════════════════════════
+   出荷確定（このタイミングだけGASへ通信する）
+═════════════════════════════════════════════════════════ */
+async function confirmShipment() {
+  if (ST.items.length === 0) return;
+  if (!GAS_URL) {
+    showModal('GAS_URLが未設定です', 'コード上部の GAS_URL に、デプロイしたウェブアプリのURLを設定してください。');
+    return;
+  }
+
+  const planned = ST.plannedQty ? parseInt(ST.plannedQty, 10) : null;
+  if (planned && planned > 0 && planned !== ST.items.length) {
+    renderQtyMismatch(planned, ST.items.length);
+    return;
+  }
+
+  await doConfirmSend(null);
+}
+
+/* 予定数と実際に読んだ本数が違うときの確認画面。
+   理由を選んでもらってから送信する（欠品・後送あり・その他）。
+   予定数を入力していない通常出荷では、このチェックは一切表示されない。 */
+function renderQtyMismatch(planned, actual) {
+  const diff = actual - planned;
+  const diffText = diff > 0 ? `予定より ${diff} 本多い` : `予定より ${Math.abs(diff)} 本少ない`;
+  document.getElementById('app').innerHTML = `
+    <div class="result-card error">
+      <span class="result-icon">⚠️</span>
+      <div class="result-title">予定数と本数が違います</div>
+      <div class="result-msg">予定 ${planned} 本 ／ 実際 ${actual} 本（${esc(diffText)}）<br>読み忘れ・重複読みがないか、もう一度確認してください。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">意図的な差なら、理由を選んで確定できます</div>
+      <button class="btn-primary" style="margin-bottom:8px;" onclick="doConfirmSend('欠品')">欠品（在庫がなく、この本数で出す）</button>
+      <button class="btn-primary" style="margin-bottom:8px;" onclick="doConfirmSend('後送あり')">後送あり（残りは別の日に出す）</button>
+      <button class="btn-primary" style="margin-bottom:8px;" onclick="doConfirmSend('その他')">その他の理由で確定する</button>
+    </div>
+    <button class="btn-reset" onclick="renderScanning()">一覧に戻って確認する</button>
+  `;
+}
+
+async function doConfirmSend(mismatchReason) {
+  await stopScanning();
+  document.getElementById('app').innerHTML = `
+    <div class="card" style="text-align:center;padding:40px 16px;">
+      <div style="font-size:40px;margin-bottom:12px;">📡</div>
+      <div style="font-weight:700;">送信中...</div>
+    </div>
+  `;
+
+  const name = custName(ST.custCode) || '';
+  const planned = ST.plannedQty ? parseInt(ST.plannedQty, 10) : null;
+  const payload = {
+    action: 'ship_confirm',
+    custCode: ST.custCode,
+    custName: name,
+    shipDate: todayStr(),
+    products: ST.items.map(it => it.num).join(',')
+  };
+  if (planned && planned > 0) payload.plannedQty = planned;
+  if (mismatchReason) payload.mismatchReason = mismatchReason;
+
+  let res;
+  try {
+    res = await gasGet(payload);
+  } catch (e) {
+    setFeedback('ng');
+    showModal('サーバーに接続できません', '電波の良い場所でもう一度お試しください。<br>読み取った内容は消えていません。');
+    renderScanning();
+    return;
+  }
+
+  if (!res.success) {
+    if (res.error === 'duplicate') {
+      setFeedback('ng');
+      renderDuplicateError(res.duplicates || []);
+      return;
+    }
+    setFeedback('ng');
+    showModal('送信できませんでした', esc(res.error || 'もう一度お試しください'));
+    renderScanning();
+    return;
+  }
+
+  setFeedback('complete');
+  renderComplete(res);
+}
+
+function renderDuplicateError(dups) {
+  const name = custName(ST.custCode) || '';
+  document.getElementById('app').innerHTML = `
+    <div class="result-card error">
+      <span class="result-icon">⚠️</span>
+      <div class="result-title">二重出荷の可能性</div>
+      <div class="result-msg">次のロット番号は、すでに出荷済みとして記録されています。<br>現品を確認し、該当の番号を一覧から削除してから、もう一度確定してください。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">出荷済みだった番号</div>
+      ${dups.map(d => `<div class="dup-item">${esc(d)}</div>`).join('')}
+    </div>
+    <button class="btn-primary" onclick="removeDuplicatesAndReturn(${JSON.stringify(dups).replace(/"/g,'&quot;')})">この番号を一覧から外す</button>
+    <button class="btn-reset" onclick="renderScanning()">一覧に戻る</button>
+  `;
+}
+
+function removeDuplicatesAndReturn(dups) {
+  ST.items = ST.items.filter(it => !dups.includes(it.num));
+  saveState();
+  renderScanning();
+}
+
+function renderComplete(res) {
+  const name = custName(ST.custCode) || '';
+  document.getElementById('app').innerHTML = `
+    <div class="result-card ok">
+      <span class="result-icon">🎉</span>
+      <div class="result-title">出荷確定しました</div>
+      <div class="result-msg">${esc(name)}　${esc(todayStr())}<br>${ST.items.length}本を記録しました</div>
+    </div>
+    <button class="btn-primary" onclick="resetAll()">次の得意先へ</button>
+  `;
+  clearState();
+}
+
+/* ─── 注意モーダル ───────────────────────────────── */
+function showModal(title, msg) {
+  document.getElementById('modal').innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="modal-icon">⚠️</div>
+        <div class="modal-title">${esc(title)}</div>
+        <div class="modal-msg">${msg}</div>
+        <button class="modal-btn" onclick="closeModal()">閉じる</button>
+      </div>
+    </div>
+  `;
+}
+function closeModal() { document.getElementById('modal').innerHTML = ''; }
+
+function resetAll() {
+  clearState();
+  renderEntry();
+}
+
+/* ═════════════════════════════════════════════════════════
+   起動
+═════════════════════════════════════════════════════════ */
+const APP_VERSION = 'v1.0 (2026-09-04)';
+(function () {
+  const el = document.getElementById('appVer');
+  if (el) el.textContent = APP_VERSION;
+})();
+
+async function checkForUpdate() {
+  try {
+    const base = location.href.split('?')[0].split('#')[0];
+    const res = await fetch(base + '?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const text = await res.text();
+    const m = text.match(/const APP_VERSION = '([^']+)'/);
+    if (!m) return;
+    const latest = m[1];
+    if (latest === APP_VERSION) { sessionStorage.removeItem('shipUpdTried'); return; }
+    if (sessionStorage.getItem('shipUpdTried') === latest) return;
+    sessionStorage.setItem('shipUpdTried', latest);
+    document.getElementById('app').innerHTML = `
+      <div class="card" style="text-align:center;padding:30px 16px;">
+        <div style="font-size:40px;margin-bottom:12px;">⬇️</div>
+        <div style="font-weight:700;">新しい版に更新しています</div>
+        <div style="font-size:12px;color:#888;margin-top:8px;">${APP_VERSION} → ${latest}</div>
+      </div>
+    `;
+    location.replace(base + '?v=' + encodeURIComponent(latest));
+  } catch (e) {}
+}
+
+if (ST.stage === 'scanning' && ST.custCode && custName(ST.custCode)) {
+  renderScanning();
+} else {
+  renderEntry();
+}
+checkForUpdate();
+</script>
+</body>
+</html>
