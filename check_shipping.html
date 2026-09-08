@@ -35,6 +35,21 @@
     手元に残らないため、必ず手入力になる。このボタンは手入力欄への
     注意書きを表示し、フォーカスを合わせるだけで、記録の仕組み自体は
     通常の手入力と同じ。
+  ・手入力欄に、型番選択ボタン（RIII460mL-T／RIII250mL-T）を追加した。
+    数字だけ（例：60）を入力すると、選んだ型番と組み合わせて6桁ゼロ埋めし、
+    「RIII460mL-T 000060」の形にしてから記録する。型番込みの文字列を
+    そのまま打った場合はそちらを優先する（数字だけかどうかで自動判定）。
+
+  ── 2026-09-09 の変更点 ──────────────────────────────────
+  ・型番を4種類に増やした（PRODUCT_TYPES定数を参照）。
+    RIII460mL-T（3個箱）／RIII250mL-T（6個箱）／
+    RIII150mL-T（6個箱・新規）／OP460mL（3個箱・オパール・新規）
+  ・型番が増えたため、手入力の選択はボタンからプルダウンに変更した。
+  ・★重要：「T」は年度記号で、毎年変わる（2026年＝T、翌年はU、…）。
+    QRを読み取る場合は、QRの中身をそのまま使うのでコード変更は不要。
+    直す必要があるのはPRODUCT_TYPES定数（手入力用の候補リスト）だけ。
+    年が変わったら、ここの「-T」を新しい年度記号に更新すること。
+    （OP460mLは年度記号が付かない表記なので、この項目は変更不要）
 ================================================================
 -->
 <html lang="ja">
@@ -152,6 +167,15 @@
   .backorder-note.show { display: block; }
   .backorder-note b { color: var(--orange); }
 
+  .prefix-select-row { margin-bottom: 10px; }
+  .prefix-select-row label { display: block; font-size: 11px; font-weight: 700; color: var(--muted);
+    margin-bottom: 4px; }
+  .prefix-select-row select {
+    width: 100%; padding: 11px 10px; font-size: 14px; font-weight: 700; border-radius: 8px;
+    border: 1.5px solid var(--navy-light); background: var(--navy-pale); color: var(--navy);
+    -webkit-appearance: none; appearance: none;
+  }
+
   .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);
     display: flex; align-items: center; justify-content: center; z-index: 100; }
   .modal { background: white; border-radius: 16px; padding: 24px; margin: 16px; text-align: center; max-width: 320px; width: 100%; }
@@ -217,6 +241,21 @@ function loadState() {
 }
 let ST = loadState();
 let itemsExpanded = false; // 一覧を全件表示しているか（大量出荷時の折りたたみ用。保存しない）
+/* ═════════════════════════════════════════════════════════
+   手入力用の型番一覧
+   ★★★ 年が変わったら、ここの「-T」を新しい年度記号に直すこと ★★★
+   （T＝2026年。来年はU、というように毎年1文字ずつ変わる。
+     QRを実際に読み取る場合は、QRの中身をそのまま使うので
+     ここを直す必要はない。直すのはこの「手入力用の候補リスト」だけ）
+═════════════════════════════════════════════════════════ */
+const PRODUCT_TYPES = [
+  { value: 'RIII460mL-T', label: 'RIII460mL-T（3個箱）' },
+  { value: 'RIII250mL-T', label: 'RIII250mL-T（6個箱）' },
+  { value: 'RIII150mL-T', label: 'RIII150mL-T（6個箱）' },
+  { value: 'OP460mL',     label: 'OP460mL（3個箱・オパール）' }
+];
+
+let manualPrefix = localStorage.getItem('ship_manualPrefix') || PRODUCT_TYPES[0].value; // 手入力欄の型番選択（前回選んだものを覚えておく）
 
 function saveState() {
   localStorage.setItem('ship_custCode', ST.custCode);
@@ -383,9 +422,13 @@ function renderScanning() {
       <div class="card-title">読み取ったロット番号</div>
       <div id="itemListWrap" class="item-list"></div>
       <div class="manual-add">
-        <div class="hint" style="margin-bottom:6px;">QRが読めないとき・後送を記録するときは、化粧箱の印字（型番＋番号）をそのまま入力できます</div>
+        <div class="hint" style="margin-bottom:6px;">QRが読めないとき・後送を記録するときは、化粧箱の印字をそのまま入力できます。<br>番号だけ（例：60）でもOK。下で選んだ型番と組み合わせて自動でゼロ埋めします。</div>
+        <div class="prefix-select-row">
+          <label>型番を選ぶ（数字だけ入力するとき用）</label>
+          <select id="manualPrefixSelect" onchange="selectManualPrefix(this.value)"></select>
+        </div>
         <div class="manual-add-row">
-          <input id="manualNum" type="text" inputmode="text" placeholder="例：RIII460mL-T 000925" maxlength="30">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：60（または RIII460mL-T 000060）" maxlength="30">
           <button onclick="addManual()">追加</button>
         </div>
       </div>
@@ -394,7 +437,22 @@ function renderScanning() {
     <button class="btn-confirm" id="confirmBtn" onclick="confirmShipment()">出荷確定</button>
     <button class="btn-reset" onclick="resetAll()">🔄 最初からやり直す</button>
   `;
+  updateManualPrefixButtons();
   updateScanningDynamic();
+}
+
+/* 手入力の型番選択（プルダウン）。選んだ型番はlocalStorageに覚えておき、
+   次回もそのまま使える（同じ型番の作業が続くことが多いため）。 */
+function selectManualPrefix(p) {
+  manualPrefix = p;
+  localStorage.setItem('ship_manualPrefix', p);
+}
+function updateManualPrefixButtons() {
+  const sel = document.getElementById('manualPrefixSelect');
+  if (!sel) return;
+  sel.innerHTML = PRODUCT_TYPES.map(t =>
+    `<option value="${esc(t.value)}"${t.value === manualPrefix ? ' selected' : ''}>${esc(t.label)}</option>`
+  ).join('');
 }
 
 /* カメラのプレビュー（#reader）とスキャン開始ボタンには一切触れず、
@@ -506,9 +564,20 @@ function toggleBackorderNote() {
 
 function addManual() {
   const el = document.getElementById('manualNum');
-  const num = el.value.trim();
-  if (!num) return;
-  addProductNumber(num, [num]);
+  const raw = el.value.trim();
+  if (!raw) return;
+
+  let fullId;
+  if (/^\d+$/.test(raw)) {
+    // 数字だけの入力（例：60）→ 選んだ型番と組み合わせて6桁ゼロ埋めする
+    const padded = raw.padStart(6, '0');
+    fullId = manualPrefix + ' ' + padded;
+  } else {
+    // すでに型番込みで打たれた文字列（例：RIII460mL-T 000060）は、そのまま使う
+    fullId = raw;
+  }
+
+  addProductNumber(fullId, [fullId]);
   el.value = '';
   updateScanningDynamic();
 }
@@ -829,7 +898,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.3 (2026-09-08)';
+const APP_VERSION = 'v1.5 (2026-09-09)';
 (function () {
   const el = document.getElementById('appVer');
   if (el) el.textContent = APP_VERSION;
