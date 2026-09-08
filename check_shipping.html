@@ -30,6 +30,11 @@
     特殊文字が文字化けする不具合を実際に確認したため。
   ・型番なしの従来のQR（BOX:000925,000926,000927）も、
     そのまま読み取れる（後方互換）。
+  ・「🚚 後送分を記録する」ボタンを追加した。後送分は、元の3個箱・6個箱が
+    最初の出荷分と一緒に得意先へ発送されてしまい、封緘シールのQRが
+    手元に残らないため、必ず手入力になる。このボタンは手入力欄への
+    注意書きを表示し、フォーカスを合わせるだけで、記録の仕組み自体は
+    通常の手入力と同じ。
 ================================================================
 -->
 <html lang="ja">
@@ -138,6 +143,14 @@
   .manual-add-row input { flex: 1; }
   .manual-add-row button { padding: 0 16px; background: var(--navy); color: white; border: none; border-radius: 8px;
     font-size: 13px; font-weight: 700; }
+
+  .backorder-btn { width: 100%; padding: 12px; background: #fff4e6; border: 1.5px solid var(--orange);
+    border-radius: 10px; font-size: 13px; font-weight: 700; color: var(--orange); cursor: pointer;
+    margin-bottom: 16px; -webkit-appearance: none; }
+  .backorder-note { background: #fff4e6; border: 1.5px solid var(--orange); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 12px; font-size: 12.5px; color: #7a4a00; line-height: 1.6; display: none; }
+  .backorder-note.show { display: block; }
+  .backorder-note b { color: var(--orange); }
 
   .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);
     display: flex; align-items: center; justify-content: center; z-index: 100; }
@@ -349,6 +362,14 @@ function renderScanning() {
       <div class="slip-sub">店番号 ${esc(ST.custCode)}　／　出荷日 ${esc(todayStr())}</div>
     </div>
 
+    <button class="backorder-btn" onclick="toggleBackorderNote()">🚚 後送分を記録する（元箱のQRは使えません）</button>
+    <div class="backorder-note" id="backorderNote">
+      <b>後送は、必ず手入力してください。</b><br>
+      もとの3個箱・6個箱は、最初の出荷分と一緒に得意先へ発送されてしまうため、
+      封緘シールのQRは<b>手元に残りません。</b>後送する1本の、化粧箱に直接印字されている
+      番号を見て、下の欄に入力してください。
+    </div>
+
     <div class="card">
       <div class="card-title">QRスキャナー</div>
       <div id="reader" class="hidden"></div>
@@ -362,9 +383,9 @@ function renderScanning() {
       <div class="card-title">読み取ったロット番号</div>
       <div id="itemListWrap" class="item-list"></div>
       <div class="manual-add">
-        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シール上半分の印字（型番＋番号）をそのまま入力できます</div>
+        <div class="hint" style="margin-bottom:6px;">QRが読めないとき・後送を記録するときは、化粧箱の印字（型番＋番号）をそのまま入力できます</div>
         <div class="manual-add-row">
-          <input id="manualNum" type="text" inputmode="text" placeholder="例：RⅢ460mL-T 000925" maxlength="30">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：RIII460mL-T 000925" maxlength="30">
           <button onclick="addManual()">追加</button>
         </div>
       </div>
@@ -465,6 +486,22 @@ function removeItem(i) {
   ST.items.splice(i, 1);
   saveState();
   updateScanningDynamic();
+}
+
+/* 「後送分を記録する」ボタン：注意書きを開き、手入力欄にフォーカスして
+   すぐ番号を打てるようにする。QRスキャンとは独立していて、
+   カメラの状態には一切影響しない。 */
+function toggleBackorderNote() {
+  const note = document.getElementById('backorderNote');
+  if (!note) return;
+  note.classList.toggle('show');
+  if (note.classList.contains('show')) {
+    const input = document.getElementById('manualNum');
+    if (input) {
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      input.focus();
+    }
+  }
 }
 
 function addManual() {
@@ -792,7 +829,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.2 (2026-09-08)';
+const APP_VERSION = 'v1.3 (2026-09-08)';
 (function () {
   const el = document.getElementById('appVer');
   if (el) el.textContent = APP_VERSION;
