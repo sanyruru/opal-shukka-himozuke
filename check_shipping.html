@@ -17,6 +17,19 @@
   アラジン側の改修は一切不要。得意先マスタはこのファイルの中に
   そのまま埋め込んである（得意先566件＋別送先104件＝670件）。得意先が増減したら、下の
   CUSTOMER_MASTER をエクスポートし直して丸ごと置き換えるだけでよい。
+
+  ── 2026-09-08 の変更点 ──────────────────────────────────
+  ・QRの中身に「型番」を含められるようにした
+    （例：BOX:RIII460mL-T:000925,000926,000927）
+    型番があれば「RIII460mL-T 000925」という形でロット番号として記録される。
+    型番が違えば番号が同じでも別物として扱われるので、
+    460mL用・250mL用など、別々に採番している連番同士が
+    スプレッドシート上で衝突しなくなる。
+  ・型番の表記は、ローマ数字の特殊文字（Ⅲ）ではなく、
+    普通の英字「RIII」を使うこと。QRコードの生成・読み取りの過程で
+    特殊文字が文字化けする不具合を実際に確認したため。
+  ・型番なしの従来のQR（BOX:000925,000926,000927）も、
+    そのまま読み取れる（後方互換）。
 ================================================================
 -->
 <html lang="ja">
@@ -349,9 +362,9 @@ function renderScanning() {
       <div class="card-title">読み取ったロット番号</div>
       <div id="itemListWrap" class="item-list"></div>
       <div class="manual-add">
-        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シール上半分の番号を直接入力できます</div>
+        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シール上半分の印字（型番＋番号）をそのまま入力できます</div>
         <div class="manual-add-row">
-          <input id="manualNum" type="text" inputmode="numeric" placeholder="例：000925" maxlength="6">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：RⅢ460mL-T 000925" maxlength="30">
           <button onclick="addManual()">追加</button>
         </div>
       </div>
@@ -463,7 +476,8 @@ function addManual() {
   updateScanningDynamic();
 }
 
-/* 箱QR（BOX:000925,000926,000927）または単体番号を受け取り、重複を避けて追加する */
+/* 箱QR（BOX:RⅢ460mL-T:000925,000926,000927 または 従来のBOX:000925,...）
+   または単体番号を受け取り、重複を避けて追加する */
 function addProductNumber(num, boxGroup) {
   if (ST.items.some(it => it.num === num)) {
     setFeedback('already');
@@ -475,12 +489,25 @@ function addProductNumber(num, boxGroup) {
   return true;
 }
 
+/* QRの中身を解析する。
+   新形式：BOX:型番:番号,番号,番号   例）BOX:RⅢ460mL-T:000925,000926,000927
+   旧形式：BOX:番号,番号,番号        例）BOX:000925,000926,000927（型番なし。そのまま数字だけで扱う）
+   型番を挟むことで、460mL用・250mL用など別々の連番同士が
+   スプレッドシート上で同じ番号として衝突しないようにしている。 */
 function parseBoxCode(raw) {
   const m = String(raw).trim().match(/^BOX:(.+)$/i);
   if (!m) return null;
-  const nums = m[1].split(',').map(s => s.trim()).filter(Boolean);
+  const rest = m[1];
+  const colonIdx = rest.indexOf(':');
+  let prefix = '';
+  let numsPart = rest;
+  if (colonIdx !== -1) {
+    prefix = rest.substring(0, colonIdx).trim();
+    numsPart = rest.substring(colonIdx + 1);
+  }
+  const nums = numsPart.split(',').map(s => s.trim()).filter(Boolean);
   if (nums.length === 0) return null;
-  return nums;
+  return { prefix: prefix, nums: nums };
 }
 
 /* ═════════════════════════════════════════════════════════
@@ -519,16 +546,20 @@ function extractCodeFromScan(decodedText) {
 }
 
 function handleScannedCode(raw) {
-  const boxNums = parseBoxCode(raw);
-  if (!boxNums) {
+  const parsed = parseBoxCode(raw);
+  if (!parsed) {
     setFeedback('ng');
     showModal('登録されていないQRコードです', 'この箱の封緘シールQRではありません。<br>汚れている場合は下の欄に番号を手入力してください。');
     return;
   }
+  const prefix = parsed.prefix;
+  // 型番があれば「RⅢ460mL-T 000925」の形に結合する。型番がなければ番号だけ（旧形式）。
+  const fullIds = parsed.nums.map(n => prefix ? (prefix + ' ' + n) : n);
+
   let addedAny = false;
   let allDup = true;
-  boxNums.forEach(n => {
-    const ok = addProductNumber(n, boxNums);
+  fullIds.forEach(fullId => {
+    const ok = addProductNumber(fullId, fullIds);
     if (ok) { addedAny = true; allDup = false; }
   });
   if (!addedAny && !allDup) { /* no-op */ }
@@ -761,7 +792,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.0 (2026-09-04)';
+const APP_VERSION = 'v1.2 (2026-09-08)';
 (function () {
   const el = document.getElementById('appVer');
   if (el) el.textContent = APP_VERSION;
