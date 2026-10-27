@@ -54,6 +54,17 @@
   ── 2026-09-09 追記 ──────────────────────────────────
   ・OP460mL（年度記号なし）を廃止し、OP460mL-T（年度記号あり）に変更した。
     これで4種類すべてに年度記号「-T」が付く形になった。（頭文字は「OP」のまま）
+
+  ── 2026-10-27 の変更点 ──────────────────────────────────
+  ・型番を実際の3種類に直した（容量の表記が実物と違っていたため）。
+    RIII410mL（3個箱）／RIII140mL（6個箱）／OP410mL（3個箱・オパール）
+  ・記録の形を「RIII410mL T000001」に変えた。年度記号（T）を型番の後ろから
+    番号の頭へ移し、封緘シールに印字した番号（T000001）と同じ見え方にした。
+    封緘シールのQRは BOX:RIII410mL:T000001,T000002,T000003 の形で作る。
+  ・手入力は、数字だけ（例：60）なら YEAR_CODE を付けて「T000060」にする。
+    「T60」「T000060」のように年度記号付きで打ってもよい。全角でも受け付ける。
+  ・年度記号は YEAR_CODE 定数1か所だけになった（毎年ここだけ直す）。
+  ・前回選んだ型番がリストに無い場合は、先頭の型番に戻すようにした。
 ================================================================
 -->
 <html lang="ja">
@@ -246,20 +257,22 @@ function loadState() {
 let ST = loadState();
 let itemsExpanded = false; // 一覧を全件表示しているか（大量出荷時の折りたたみ用。保存しない）
 /* ═════════════════════════════════════════════════════════
-   手入力用の型番一覧
-   ★★★ 年が変わったら、ここの「-T」を新しい年度記号に直すこと ★★★
+   手入力用の型番一覧と年度記号
+   ★★★ 年が変わったら、YEAR_CODE を新しい年度記号に直すこと ★★★
    （T＝2026年。来年はU、というように毎年1文字ずつ変わる。
      QRを実際に読み取る場合は、QRの中身をそのまま使うので
-     ここを直す必要はない。直すのはこの「手入力用の候補リスト」だけ）
+     ここを直す必要はない。手入力で数字だけ打ったときに付ける記号）
 ═════════════════════════════════════════════════════════ */
+const YEAR_CODE = 'T';
 const PRODUCT_TYPES = [
-  { value: 'RIII460mL-T', label: 'RIII460mL-T（3個箱）' },
-  { value: 'RIII250mL-T', label: 'RIII250mL-T（6個箱）' },
-  { value: 'RIII150mL-T', label: 'RIII150mL-T（6個箱）' },
-  { value: 'OP460mL-T', label: 'OP460mL-T（3個箱・オパール）' }
+  { value: 'RIII410mL', label: 'RIII410mL（3個箱）' },
+  { value: 'RIII140mL', label: 'RIII140mL（6個箱）' },
+  { value: 'OP410mL', label: 'OP410mL（3個箱・オパール）' }
 ];
 
 let manualPrefix = localStorage.getItem('ship_manualPrefix') || PRODUCT_TYPES[0].value; // 手入力欄の型番選択（前回選んだものを覚えておく）
+// 前回選んだ型番がリストから消えていたら（型番の変更後など）、先頭の型番に戻す
+if (!PRODUCT_TYPES.some(t => t.value === manualPrefix)) manualPrefix = PRODUCT_TYPES[0].value;
 
 function saveState() {
   localStorage.setItem('ship_custCode', ST.custCode);
@@ -432,7 +445,7 @@ function renderScanning() {
           <select id="manualPrefixSelect" onchange="selectManualPrefix(this.value)"></select>
         </div>
         <div class="manual-add-row">
-          <input id="manualNum" type="text" inputmode="text" placeholder="例：60（または RIII460mL-T 000060）" maxlength="30">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：60（または T000060）" maxlength="30">
           <button onclick="addManual()">追加</button>
         </div>
       </div>
@@ -568,17 +581,22 @@ function toggleBackorderNote() {
 
 function addManual() {
   const el = document.getElementById('manualNum');
-  const raw = el.value.trim();
+  // 全角の英数字・空白は半角にそろえる（例：Ｔ６０ → T60）
+  const raw = el.value
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, ' ')
+    .trim();
   if (!raw) return;
 
   let fullId;
-  if (/^\d+$/.test(raw)) {
-    // 数字だけの入力（例：60）→ 選んだ型番と組み合わせて6桁ゼロ埋めする
-    const padded = raw.padStart(6, '0');
-    fullId = manualPrefix + ' ' + padded;
+  const m = raw.match(/^([A-Za-z])?\s*(\d{1,6})$/);
+  if (m) {
+    // 番号だけの入力（例：60、T60、T000060）→ 選んだ型番＋年度記号＋6桁ゼロ埋め
+    const year = m[1] ? m[1].toUpperCase() : YEAR_CODE;
+    fullId = manualPrefix + ' ' + year + m[2].padStart(6, '0');
   } else {
-    // すでに型番込みで打たれた文字列（例：RIII460mL-T 000060）は、そのまま使う
-    fullId = raw;
+    // すでに型番込みで打たれた文字列（例：RIII410mL T000060）は、空白をそろえてそのまま使う
+    fullId = raw.replace(/\s+/g, ' ');
   }
 
   addProductNumber(fullId, [fullId]);
@@ -663,7 +681,7 @@ function handleScannedCode(raw) {
     return;
   }
   const prefix = parsed.prefix;
-  // 型番があれば「RⅢ460mL-T 000925」の形に結合する。型番がなければ番号だけ（旧形式）。
+  // 型番があれば「RIII410mL T000925」の形に結合する。型番がなければ番号だけ（旧形式）。
   const fullIds = parsed.nums.map(n => prefix ? (prefix + ' ' + n) : n);
 
   let addedAny = false;
@@ -902,7 +920,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.7 (2026-09-09)';
+const APP_VERSION = 'v1.8 (2026-10-27)';
 (function () {
   const el = document.getElementById('appVer');
   if (el) el.textContent = APP_VERSION;
