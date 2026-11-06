@@ -866,13 +866,14 @@ function renderDuplicateError(dups) {
     <div class="result-card error">
       <span class="result-icon">⚠️</span>
       <div class="result-title">二重出荷の可能性</div>
-      <div class="result-msg">次のロット番号は、すでに出荷済みとして記録されています。<br>現品を確認し、該当の番号を一覧から削除してから、もう一度確定してください。</div>
+      <div class="result-msg">次のロット番号は、前の出荷ですでに記録されています。<br>現品を確認し、出さない番号は「今回の出荷から外す」を押してから、もう一度確定してください。</div>
     </div>
     <div class="card">
       <div class="card-title">出荷済みだった番号</div>
       ${dups.map(d => `<div class="dup-item">${esc(d)}</div>`).join('')}
+      <div style="font-size:12px;color:#5c6b77;margin-top:8px;line-height:1.6">「今回の出荷から外す」は、今スキャンした一覧から消すだけです。<b>前の出荷の記録は消えません。</b><br>同じ番号をもう一度スキャンすると、また この画面が出ます。<br>前の記録がまちがいのときは、事務所に連絡してスプレッドシートの記録を直してもらってください。</div>
     </div>
-    <button class="btn-primary" onclick="removeDuplicatesAndReturn(${JSON.stringify(dups).replace(/"/g,'&quot;')})">この番号を一覧から外す</button>
+    <button class="btn-primary" onclick="removeDuplicatesAndReturn(${JSON.stringify(dups).replace(/"/g,'&quot;')})">今回の出荷から外す</button>
     <button class="btn-reset" onclick="renderScanning()">一覧に戻る</button>
   `;
 }
@@ -920,7 +921,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.8 (2026-10-27)';
+const APP_VERSION = 'v1.9 (2026-11-06)';
 (function () {
   const el = document.getElementById('appVer');
   if (el) el.textContent = APP_VERSION;
