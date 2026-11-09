@@ -57,6 +57,13 @@
   }
   .field input:focus { outline: none; border-color: var(--navy-light); }
   .field .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .agy-suggest { border: 1.5px solid var(--green); border-radius: 10px; margin-top: 6px; overflow: hidden; background: var(--surface); }
+  .agy-suggest:empty { display: none; }
+  .agy-item { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; padding: 13px 12px; background: var(--surface);
+    border: none; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text); cursor: pointer; -webkit-appearance: none; }
+  .agy-item:last-child { border-bottom: none; }
+  .agy-item span { font-family: monospace; font-size: 13px; color: var(--muted); }
+  .agy-picked { margin-top: 6px; font-size: 14px; font-weight: 700; color: var(--green); min-height: 1em; }
   .err { color: var(--red); font-size: 13px; font-weight: 700; margin-top: 8px; min-height: 1em; }
 
   .btn-primary { width: 100%; padding: 16px; background: var(--navy); border: none; border-radius: 12px;
@@ -193,6 +200,9 @@ function lsGet(k, d) { try { const v = localStorage.getItem('agy_' + k); return 
 function lsSet(k, v) { try { localStorage.setItem('agy_' + k, v); } catch (e) {} }
 function lsDel(k) { try { localStorage.removeItem('agy_' + k); } catch (e) {} }
 
+/* 代理店様ごとのURL（…/agency_shipping.html?a=21000）。手順書のQRに入れてある */
+const URL_AGENCY = (new URLSearchParams(location.search).get('a') || '').trim();
+
 const AUTH = {
   code: lsGet('code', ''), pin: lsGet('pin', ''), name: lsGet('name', ''),
   stores: JSON.parse(lsGet('stores', '[]'))
@@ -266,7 +276,10 @@ function renderLogin() {
       <div class="card-title">代理店コードと暗証番号</div>
       <div class="field">
         <label>代理店コード</label>
-        <input id="inCode" type="text" inputmode="numeric" maxlength="10" value="${esc(AUTH.code)}" placeholder="例：21000">
+        <input id="inCode" type="text" maxlength="20" autocomplete="off" value="${esc(AUTH.code || URL_AGENCY)}" placeholder="数字か会社名を入れて、下から選ぶ"
+          oninput="agyTyped()" onfocus="drawAgySuggest()">
+        <div id="agySuggest" class="agy-suggest"></div>
+        <div id="agyPicked" class="agy-picked"></div>
       </div>
       <div class="field">
         <label>暗証番号</label>
@@ -277,6 +290,34 @@ function renderLogin() {
     </div>
     <button class="btn-primary" id="btnLogin" onclick="doLogin()">はじめる</button>
   `;
+  showPicked();
+}
+
+/* 代理店コードの候補。数字か会社名の一部を入れると、下に出る */
+const AGENCIES = [
+  { code: '21000', name: '(有)吉田商会' },
+  { code: '14000', name: '(株)舘野商店' },
+  { code: '53000', name: '(株)田窪商店' },
+];
+function agyByCode(c) { return AGENCIES.find(a => a.code === c); }
+function drawAgySuggest() {
+  const el = document.getElementById('agySuggest');
+  if (!el) return;
+  const q = toHalf(document.getElementById('inCode').value);
+  const hit = agyByCode(q);
+  const list = hit ? [] : AGENCIES.filter(a => !q || a.code.startsWith(q) || a.name.includes(q));
+  el.innerHTML = list.map(a => `<button type="button" class="agy-item" onmousedown="event.preventDefault()" onclick="pickAgency('${a.code}')">${esc(a.name)}<span>${a.code}</span></button>`).join('');
+}
+function showPicked() {
+  const a = agyByCode(toHalf(document.getElementById('inCode').value));
+  document.getElementById('agyPicked').textContent = a ? '✔ ' + a.name : '';
+}
+function agyTyped() { drawAgySuggest(); showPicked(); }
+function pickAgency(code) {
+  document.getElementById('inCode').value = code;
+  document.getElementById('agySuggest').innerHTML = '';
+  showPicked();
+  document.getElementById('inPin').focus();
 }
 
 async function doLogin() {
@@ -704,7 +745,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.2 (2026-11-09)';
+const APP_VERSION = 'v1.4 (2026-11-09)';
 document.getElementById('appVer').textContent = APP_VERSION;
 
 async function checkForUpdate() {
@@ -716,8 +757,15 @@ async function checkForUpdate() {
     if (!m || m[1] === APP_VERSION) { sessionStorage.removeItem('agyUpdTried'); return; }
     if (sessionStorage.getItem('agyUpdTried') === m[1]) return;
     sessionStorage.setItem('agyUpdTried', m[1]);
-    location.replace(base + '?v=' + encodeURIComponent(m[1]));
+    location.replace(base + '?' + (URL_AGENCY ? 'a=' + encodeURIComponent(URL_AGENCY) + '&' : '') + 'v=' + encodeURIComponent(m[1]));
   } catch (e) {}
+}
+
+/* 別の代理店様のURLで開いたときは、入れ直してもらう */
+if (URL_AGENCY && agyByCode(URL_AGENCY) && AUTH.code && AUTH.code !== URL_AGENCY) {
+  ['code', 'pin', 'name', 'stores'].forEach(lsDel);
+  Object.assign(AUTH, { code: '', pin: '', name: '', stores: [] });
+  clearState();
 }
 
 if (!AUTH.code || !AUTH.pin) {
