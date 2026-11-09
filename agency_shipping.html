@@ -396,9 +396,12 @@ function renderStoreSelect() {
 
 function drawStoreList() {
   const q = toHalf(document.getElementById('storeSearch').value || '');
-  const list = AUTH.stores.filter(s => !q || s.name.includes(q) || s.code.includes(q));
+  // 数字は店番号の頭から（140 → 140xx）、文字は店名のどこでも
+  const isNum = /^\d+$/.test(q);
+  const list = AUTH.stores.filter(s => !q || (isNum ? s.code.startsWith(q) : (s.name.includes(q) || s.code.includes(q))));
+  const head = q ? `<div class="hint" style="margin:0 0 2px">候補 ${list.length}件${list.length > 1 && isNum ? '（数字を続けて入れると、もっとしぼれます）' : ''}</div>` : '';
   document.getElementById('storeList').innerHTML = list.length
-    ? list.map(s => `<button class="store-btn" onclick="selectStore('${esc(s.code)}')">${esc(s.name)}<small>店番号 ${esc(s.code)}</small></button>`).join('')
+    ? head + list.map(s => `<button class="store-btn" onclick="selectStore('${esc(s.code)}')">${esc(s.name)}<small>店番号 ${esc(s.code)}</small></button>`).join('')
     : `<div class="empty-list">${AUTH.stores.length ? '見つかりません' : '販売店がまだありません。下の欄に販売店の名前を入れて「足す」を押してください'}</div>`;
 }
 
@@ -745,7 +748,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.4 (2026-11-09)';
+const APP_VERSION = 'v1.5 (2026-11-09)';
 document.getElementById('appVer').textContent = APP_VERSION;
 
 async function checkForUpdate() {
