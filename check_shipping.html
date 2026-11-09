@@ -234,7 +234,7 @@ const CUSTOMER_MASTER = {"1001":"コスメサルーン下妻","1002":"コスメ�
    GAS連携
    デプロイ後の /exec URL に書き換えてください。
 ───────────────────────────────────────── */
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbwKAmObE3pq71Wy-NcRMPm0eC5DDlyY6l3Rvw08pnErYV22EfEgDX1754_nn8H24g5V/exec'; // 例: 'https://script.google.com/macros/s/xxxxx/exec'
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbwhGp3O5Ivdjs5afim6Vnjgo4glFnsbbbOt4n-JmHAofjlI7U1Qi07S90t2oMYFHePQ/exec'; // 例: 'https://script.google.com/macros/s/xxxxx/exec'
 
 function gasGet(params) {
   const qs = Object.keys(params)
@@ -921,7 +921,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.9 (2026-11-06)';
+const APP_VERSION = 'v1.10 (2026-11-09)';
 (function () {
   const el = document.getElementById('appVer');
   if (el) el.textContent = APP_VERSION;
