@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<!--
+================================================================
+  代理店出荷（agency_shipping.html）
+
+  ★★★ このファイルを直したら、APP_VERSION も必ず新しくすること ★★★
+
+  代理店様が、自社から届いた3個箱・6個箱の封緘シールQRを読んで、
+  どの販売店様へ出したかを記録する画面。自社の出荷紐付け（check_shipping.html）と同じ
+  QRシールをそのまま読む。記録先は代理店用の別のスプレッドシート（代理店出荷記録.gs）。
+
+  この画面がやること：
+  ① 代理店コードと暗証番号を入れる（スマホが覚えるので最初の1回だけ）
+  ② 販売店を一覧から選ぶ（一覧はGASの「販売店」シートから。無ければ名前を入れて足せる）
+  ③ 箱のQRを読む（3個箱・6個箱どちらも同じ。読めなければ番号を手で入れる）
+  ④「出荷確定」を押したときだけGASへ送る。その代理店様の中で同じ番号を2回出していないかを
+     GAS側で確かめて、スプレッドシートに1本1行で残す
+
+  ★★★ 年が変わったら YEAR_CODE を直すこと（2026年＝T、2027年＝U）★★★
+  （手入力で数字だけ打ったときに付ける記号。QRを読むときは関係ない）
+================================================================
+-->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>代理店出荷</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --navy: #1a5276; --navy-light: #4a90c2; --navy-pale: #e6f1fb;
+    --green: #2d6a4f; --green-light: #52b788; --green-pale: #d8f3dc;
+    --red: #c1121f; --red-pale: #ffe8e8; --orange: #e76f00;
+    --bg: #f4f1eb; --surface: #ffffff; --text: #1a1a1a; --muted: #888; --border: #e0dbd0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: var(--bg); min-height: 100vh; padding: 16px; }
+  .header { text-align: center; margin-bottom: 16px; }
+  .header-brand { font-size: 11px; letter-spacing: 0.2em; color: var(--muted); margin-bottom: 4px; }
+  .header-title { font-size: 18px; font-weight: 700; color: var(--navy); }
+  .header-ver { font-size: 10px; color: var(--muted); margin-top: 3px; font-family: monospace; }
+
+  .card { background: var(--surface); border-radius: 14px; padding: 16px; border: 1px solid var(--border); margin-bottom: 16px; }
+  .card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.15em; color: var(--muted); margin-bottom: 12px; }
+
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: block; font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+  .field input {
+    width: 100%; padding: 13px 12px; font-size: 16px; border-radius: 10px;
+    border: 1.5px solid var(--border); -webkit-appearance: none; background: var(--surface);
+  }
+  .field input:focus { outline: none; border-color: var(--navy-light); }
+  .field .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .err { color: var(--red); font-size: 13px; font-weight: 700; margin-top: 8px; min-height: 1em; }
+
+  .btn-primary { width: 100%; padding: 16px; background: var(--navy); border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700; color: white; cursor: pointer; -webkit-appearance: none; }
+  .btn-primary:disabled { background: #c9c4b8; }
+  .btn-scan { width: 100%; padding: 16px; background: var(--green); border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700; color: white; cursor: pointer; -webkit-appearance: none; }
+  .btn-scan.stop { background: var(--muted); }
+  .btn-confirm { width: 100%; padding: 18px; background: var(--green); border: none; border-radius: 14px;
+    font-size: 17px; font-weight: 700; color: white; cursor: pointer; margin-bottom: 8px; letter-spacing: 0.05em;
+    -webkit-appearance: none; }
+  .btn-reset { width: 100%; padding: 14px; background: var(--surface); border: 2px solid var(--border);
+    border-radius: 12px; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer;
+    margin-bottom: 8px; -webkit-appearance: none; }
+  .btn-text { background: none; border: none; color: var(--navy); font-size: 12px; text-decoration: underline;
+    cursor: pointer; padding: 6px; }
+  .footer-links { text-align: center; margin-top: 8px; }
+
+  #reader { width: 100%; max-width: 380px; margin: 0 auto 12px; border-radius: 10px; overflow: hidden; }
+  #reader.hidden { display: none; }
+  .scan-hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; line-height: 1.5; }
+
+  .agency-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px;
+    margin-bottom: 12px; font-size: 13px; color: var(--navy); font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+  .agency-bar span { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  .slip-card { background: var(--navy); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; }
+  .slip-label { font-size: 11px; color: rgba(255,255,255,0.75); }
+  .slip-name { font-size: 18px; font-weight: 900; color: white; }
+  .slip-sub { font-size: 12px; color: rgba(255,255,255,0.75); margin-top: 4px; line-height: 1.6; }
+  .slip-edit { color: rgba(255,255,255,0.8); font-size: 11px; text-decoration: underline; cursor: pointer; float: right; }
+
+  .store-search { width: 100%; padding: 12px; font-size: 16px; border-radius: 10px; border: 1.5px solid var(--navy-light);
+    background: var(--navy-pale); margin-bottom: 10px; -webkit-appearance: none; }
+  .store-list { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; }
+  .store-btn { text-align: left; padding: 13px 12px; background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px;
+    font-size: 15px; font-weight: 700; color: var(--text); cursor: pointer; -webkit-appearance: none; }
+  .store-btn small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .store-add { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
+
+  .count-card { background: var(--green-pale); border-radius: 14px; padding: 16px; border: 1.5px solid var(--green-light);
+    margin-bottom: 16px; text-align: center; }
+  .count-label { font-size: 11px; font-weight: 700; color: var(--green); letter-spacing: 0.1em; margin-bottom: 4px; }
+  .count-value { font-size: 40px; font-weight: 900; color: var(--green); font-family: monospace; }
+
+  .item-list { display: flex; flex-direction: column; gap: 6px; }
+  .item-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg);
+    border-radius: 8px; border: 1.5px solid var(--border); font-size: 13px; }
+  .item-row .num { flex: 1; font-family: monospace; font-weight: 700; color: var(--text); }
+  .item-row .del { color: var(--red); font-size: 18px; font-weight: 900; cursor: pointer; padding: 0 4px; }
+  .empty-list { text-align: center; color: var(--muted); font-size: 13px; padding: 16px; }
+
+  .result-card { border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 16px;
+    animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  .result-card.ok { background: var(--green); color: white; }
+  .result-card.error { background: var(--red); color: white; }
+  .result-icon { font-size: 52px; margin-bottom: 10px; display: block; }
+  .result-title { font-size: 24px; font-weight: 900; margin-bottom: 6px; }
+  .result-msg { font-size: 14px; opacity: 0.9; margin-top: 8px; line-height: 1.6; }
+
+  .manual-add { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
+  .manual-add-row { display: flex; gap: 8px; }
+  .manual-add-row input { flex: 1; padding: 11px 10px; font-size: 16px; border-radius: 8px; border: 1.5px solid var(--border); }
+  .manual-add-row button { padding: 0 16px; background: var(--navy); color: white; border: none; border-radius: 8px;
+    font-size: 13px; font-weight: 700; }
+  .prefix-select-row { margin-bottom: 10px; }
+  .prefix-select-row label { display: block; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+  .prefix-select-row select {
+    width: 100%; padding: 11px 10px; font-size: 14px; font-weight: 700; border-radius: 8px;
+    border: 1.5px solid var(--navy-light); background: var(--navy-pale); color: var(--navy);
+    -webkit-appearance: none; appearance: none;
+  }
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: white; border-radius: 16px; padding: 24px; margin: 16px; text-align: center; max-width: 320px; width: 100%; }
+  .modal-icon { font-size: 48px; margin-bottom: 12px; }
+  .modal-title { font-size: 18px; font-weight: 900; color: var(--orange); margin-bottom: 8px; }
+  .modal-msg { font-size: 14px; color: var(--text); line-height: 1.6; margin-bottom: 20px; text-align: left; }
+  .modal-btn { width: 100%; padding: 14px; background: var(--orange); border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 700; color: white; cursor: pointer; margin-bottom: 8px; }
+  .modal-btn.sub { background: var(--surface); color: var(--muted); border: 2px solid var(--border); }
+  .dup-item { font-family: monospace; background: var(--red-pale); color: var(--red); padding: 4px 8px;
+    border-radius: 6px; margin: 3px 0; font-size: 13px; }
+  .dup-item small { font-family: sans-serif; display: block; font-size: 11px; color: #7a2a2a; }
+
+  #flash { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 50; opacity: 0; }
+  #flash.ok  { animation: flashGreen 0.45s forwards; }
+  #flash.err { animation: flashRed   0.45s forwards; }
+  @keyframes flashGreen { 0% { opacity: 1; background: rgba(82, 183, 136, 0.40); } 100% { opacity: 0; } }
+  @keyframes flashRed   { 0% { opacity: 1; background: rgba(193, 18, 31, 0.40); } 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-brand">オパール化粧品</div>
+  <div class="header-title">代理店出荷</div>
+  <div class="header-ver" id="appVer"></div>
+</div>
+
+<div id="app"></div>
+<div id="modal"></div>
+<div id="flash"></div>
+
+<script>
+/* ─────────────────────────────────────────
+   GAS連携（代理店出荷記録.gs をデプロイした /exec のURL）
+───────────────────────────────────────── */
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbw81k_lfPAYZjnnmBQuCcy-vhlAUPii8C4krn5Se-aPivku4e2M9qVEvne6G1eaCrpQ/exec'; // 例: 'https://script.google.com/macros/s/xxxxx/exec'
+
+function gasGet(params) {
+  const qs = Object.keys(params)
+    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k] === undefined || params[k] === null ? '' : params[k]))
+    .join('&');
+  return fetch(GAS_URL + '?' + qs).then(r => r.json());
+}
+
+/* 手入力用の型番と年度記号（出荷紐付け画面と同じ）
+   ★★★ 年が変わったら YEAR_CODE を新しい年度記号に直すこと ★★★ */
+const YEAR_CODE = 'T';
+const PRODUCT_TYPES = [
+  { value: 'RIII410mL', label: 'RIII410mL（薬用オパールRⅢ 410ml・3個箱）' },
+  { value: 'RIII140mL', label: 'RIII140mL（薬用オパールRⅢ 140ml・6個箱）' },
+  { value: 'OP410mL', label: 'OP410mL（薬用オパール 410ml・3個箱）' }
+];
+
+/* ─────────────────────────────────────────
+   状態（localStorageに保存。ページを閉じても続きから再開できる）
+───────────────────────────────────────── */
+function lsGet(k, d) { try { const v = localStorage.getItem('agy_' + k); return v === null ? d : v; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem('agy_' + k, v); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem('agy_' + k); } catch (e) {} }
+
+const AUTH = {
+  code: lsGet('code', ''), pin: lsGet('pin', ''), name: lsGet('name', ''),
+  stores: JSON.parse(lsGet('stores', '[]'))
+};
+const ST = {
+  storeCode: lsGet('storeCode', ''),
+  items: JSON.parse(lsGet('items', '[]')),   // [{num, box:[...]}]
+  stage: lsGet('stage', 'store')             // 'store' | 'scanning'
+};
+let manualPrefix = lsGet('manualPrefix', PRODUCT_TYPES[0].value);
+if (!PRODUCT_TYPES.some(t => t.value === manualPrefix)) manualPrefix = PRODUCT_TYPES[0].value;
+
+function saveAuth() { lsSet('code', AUTH.code); lsSet('pin', AUTH.pin); lsSet('name', AUTH.name); lsSet('stores', JSON.stringify(AUTH.stores)); }
+function saveState() { lsSet('storeCode', ST.storeCode); lsSet('items', JSON.stringify(ST.items)); lsSet('stage', ST.stage); }
+function clearState() { ST.storeCode = ''; ST.items = []; ST.stage = 'store'; saveState(); }
+
+function store() { return AUTH.stores.find(s => s.code === ST.storeCode) || null; }
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// 全角の英数字・空白を半角にそろえる（例：Ｔ６０ → T60）
+function toHalf(s) {
+  return String(s).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/　/g, ' ').trim();
+}
+
+/* ─────────────────────────────────────────
+   効果音・画面の点滅
+───────────────────────────────────────── */
+let _actx = null;
+function getAudioCtx() {
+  if (!_actx) { try { _actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+  return _actx;
+}
+async function resumeCtx(ctx) { if (ctx && ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) {} } }
+function beep(ctx, {freq, duration, type = 'sine', gain = 0.3, delay = 0}) {
+  const osc = ctx.createOscillator(); const g = ctx.createGain();
+  osc.type = type; osc.frequency.value = freq; g.gain.value = gain;
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(ctx.currentTime + delay); osc.stop(ctx.currentTime + delay + duration);
+}
+async function playSound(type) {
+  const ctx = getAudioCtx(); if (!ctx) return; await resumeCtx(ctx);
+  try {
+    if (type === 'ok') { beep(ctx, {freq: 880, duration: 0.12, gain: 0.25}); beep(ctx, {freq: 1320, duration: 0.15, gain: 0.25, delay: 0.12}); }
+    else if (type === 'ng') { beep(ctx, {freq: 160, duration: 0.35, type: 'sawtooth', gain: 0.3}); }
+    else if (type === 'already') { beep(ctx, {freq: 600, duration: 0.15, gain: 0.15}); }
+    else if (type === 'complete') {
+      [523.25, 659.25, 783.99].forEach((f, i) => beep(ctx, {freq: f, duration: 0.14, type: 'triangle', gain: 0.22, delay: i * 0.14}));
+      beep(ctx, {freq: 1046.5, duration: 0.45, type: 'triangle', gain: 0.28, delay: 0.42});
+    }
+  } catch (e) {}
+}
+function setFeedback(type) {
+  playSound(type);
+  const el = document.getElementById('flash');
+  el.className = '';
+  void el.offsetWidth;
+  el.className = (type === 'ng') ? 'err' : 'ok';
+}
+
+/* ═════════════════════════════════════════════════════════
+   画面⓪：代理店コードと暗証番号（最初の1回だけ）
+═════════════════════════════════════════════════════════ */
+function renderLogin() {
+  document.getElementById('app').innerHTML = `
+    <div class="card">
+      <div class="card-title">代理店コードと暗証番号</div>
+      <div class="field">
+        <label>代理店コード</label>
+        <input id="inCode" type="text" inputmode="numeric" maxlength="10" value="${esc(AUTH.code)}" placeholder="例：21000">
+      </div>
+      <div class="field">
+        <label>暗証番号</label>
+        <input id="inPin" type="password" inputmode="numeric" maxlength="10" placeholder="6桁の数字">
+        <div class="hint">オパール化粧品からお知らせした番号です。このスマホが覚えるので、入れるのは最初の1回だけです。</div>
+      </div>
+      <div class="err" id="loginErr"></div>
+    </div>
+    <button class="btn-primary" id="btnLogin" onclick="doLogin()">はじめる</button>
+  `;
+}
+
+async function doLogin() {
+  const code = toHalf(document.getElementById('inCode').value);
+  const pin = toHalf(document.getElementById('inPin').value);
+  const errEl = document.getElementById('loginErr');
+  if (!code || !pin) { errEl.textContent = '代理店コードと暗証番号を入れてください'; return; }
+  const btn = document.getElementById('btnLogin');
+  btn.disabled = true; btn.textContent = '確認中…';
+  try {
+    const res = await gasGet({ action: 'login', code, pin });
+    if (!res.success) throw new Error(res.message || res.error);
+    Object.assign(AUTH, { code, pin, name: res.agencyName, stores: res.stores || [] });
+    saveAuth();
+    clearState();
+    renderStoreSelect();
+  } catch (e) {
+    errEl.textContent = (e.message === 'Failed to fetch' ? '通信できません。電波の良い場所でもう一度押してください' : e.message);
+    btn.disabled = false; btn.textContent = 'はじめる';
+  }
+}
+
+function logout() {
+  if (!confirm('代理店コードと暗証番号を、このスマホから消しますか？')) return;
+  ['code', 'pin', 'name', 'stores'].forEach(lsDel);
+  Object.assign(AUTH, { code: '', pin: '', name: '', stores: [] });
+  clearState();
+  renderLogin();
+}
+
+/* 販売店の一覧を、スプレッドシートの最新に入れ替える */
+async function refreshStores(silent) {
+  try {
+    const res = await gasGet({ action: 'login', code: AUTH.code, pin: AUTH.pin });
+    if (!res.success) {
+      if (res.error === 'auth') { showModal('暗証番号が変わりました', 'オパール化粧品からお知らせした、新しい暗証番号を入れてください。'); renderLogin(); }
+      return;
+    }
+    AUTH.name = res.agencyName; AUTH.stores = res.stores || [];
+    saveAuth();
+    if (!silent) renderStoreSelect();
+  } catch (e) {
+    if (!silent) showModal('通信できません', '電波の良い場所でもう一度押してください。');
+  }
+}
+
+function agencyBar() {
+  return `<div class="agency-bar">${esc(AUTH.name)}<span>代理店コード ${esc(AUTH.code)}</span></div>`;
+}
+
+/* ═════════════════════════════════════════════════════════
+   画面①：販売店を選ぶ
+═════════════════════════════════════════════════════════ */
+function renderStoreSelect() {
+  document.getElementById('app').innerHTML = `
+    ${agencyBar()}
+    <div class="card">
+      <div class="card-title">出荷する販売店を選ぶ</div>
+      <input class="store-search" id="storeSearch" type="text" placeholder="🔍 店名・店番号で探す" oninput="drawStoreList()">
+      <div class="store-list" id="storeList"></div>
+      <div class="store-add">
+        <div class="hint" style="margin-bottom:6px;">一覧にない販売店は、名前を入れて足せます（次から一覧に出ます）。</div>
+        <div class="manual-add-row">
+          <input id="newStore" type="text" placeholder="販売店の名前" maxlength="40">
+          <button onclick="addStore()">足す</button>
+        </div>
+      </div>
+    </div>
+    <div class="footer-links">
+      <button class="btn-text" onclick="refreshStores(false)">販売店の一覧を最新にする</button>
+      <button class="btn-text" onclick="logout()">代理店コードを入れ直す</button>
+    </div>
+  `;
+  drawStoreList();
+}
+
+function drawStoreList() {
+  const q = toHalf(document.getElementById('storeSearch').value || '');
+  const list = AUTH.stores.filter(s => !q || s.name.includes(q) || s.code.includes(q));
+  document.getElementById('storeList').innerHTML = list.length
+    ? list.map(s => `<button class="store-btn" onclick="selectStore('${esc(s.code)}')">${esc(s.name)}<small>店番号 ${esc(s.code)}</small></button>`).join('')
+    : `<div class="empty-list">${AUTH.stores.length ? '見つかりません' : '販売店がまだありません。下の欄に販売店の名前を入れて「足す」を押してください'}</div>`;
+}
+
+function selectStore(code) {
+  ST.storeCode = code;
+  ST.stage = 'scanning';
+  saveState();
+  renderScanning();
+}
+
+async function addStore() {
+  const name = document.getElementById('newStore').value.trim();
+  if (!name) return;
+  try {
+    const res = await gasGet({ action: 'add_store', code: AUTH.code, pin: AUTH.pin, storeName: name });
+    if (!res.success) throw new Error(res.message || res.error);
+    AUTH.stores = res.stores; saveAuth();
+    selectStore(res.store.code);
+  } catch (e) {
+    showModal('足せませんでした', esc(e.message === 'Failed to fetch' ? '電波の良い場所でもう一度押してください。' : e.message));
+  }
+}
+
+/* ═════════════════════════════════════════════════════════
+   画面②：箱QRのスキャン（3個箱・6個箱共通）
+═════════════════════════════════════════════════════════ */
+function renderScanning() {
+  const s = store();
+  document.getElementById('app').innerHTML = `
+    ${agencyBar()}
+    <div class="slip-card">
+      <span class="slip-edit" onclick="backToStore()">販売店を選び直す</span>
+      <div class="slip-label">出荷する販売店</div>
+      <div class="slip-name">${esc(s ? s.name : '（不明な販売店）')}</div>
+      <div class="slip-sub">店番号 ${esc(ST.storeCode)}　／　出荷日 ${esc(todayStr())}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">QRスキャナー</div>
+      <div id="reader" class="hidden"></div>
+      <button id="scanToggleBtn" class="btn-scan" onclick="toggleScanning()">📷 スキャン開始</button>
+      <div class="scan-hint">この販売店に出す箱の、シールのQRを読んでください<br>（3個箱・6個箱どちらも、1回で箱の中の全部の番号が入ります）</div>
+    </div>
+
+    <div id="countBlock"></div>
+
+    <div class="card">
+      <div class="card-title">読み取ったロット番号</div>
+      <div id="itemListWrap" class="item-list"></div>
+      <div class="manual-add">
+        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シールか化粧箱に書いてある番号を入れてください。<br>例：T030007 → <b>30007</b>（Tと前の0は打たなくてOK）</div>
+        <div class="prefix-select-row">
+          <label>品種を選ぶ（番号を手で入れるとき）</label>
+          <select id="manualPrefixSelect" onchange="selectManualPrefix(this.value)">
+            ${PRODUCT_TYPES.map(t => `<option value="${t.value}"${t.value === manualPrefix ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="manual-add-row">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：30007" maxlength="30">
+          <button onclick="addManual()">追加</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-confirm" id="confirmBtn" onclick="confirmShipment()">出荷確定</button>
+    <button class="btn-reset" onclick="resetAll()">🔄 最初からやり直す</button>
+  `;
+  updateScanningDynamic();
+}
+
+function selectManualPrefix(p) { manualPrefix = p; lsSet('manualPrefix', p); }
+
+function updateScanningDynamic() {
+  const count = ST.items.length;
+  const countEl = document.getElementById('countBlock');
+  if (countEl) countEl.innerHTML = `<div class="count-card"><div class="count-label">読み取り済み</div><div class="count-value">${count} 本</div></div>`;
+  const listEl = document.getElementById('itemListWrap');
+  if (listEl) {
+    listEl.innerHTML = count === 0
+      ? `<div class="empty-list">まだ読み取っていません</div>`
+      : ST.items.map((it, i) => `<div class="item-row"><div class="num">${esc(it.num)}</div><div class="del" onclick="removeItem(${i})">×</div></div>`).join('');
+  }
+  const btn = document.getElementById('confirmBtn');
+  if (btn) { btn.disabled = count === 0; btn.style.opacity = count === 0 ? '0.5' : '1'; }
+}
+
+async function backToStore() {
+  await stopScanning();
+  ST.stage = 'store';
+  saveState();
+  renderStoreSelect();
+}
+
+function removeItem(i) {
+  ST.items.splice(i, 1);
+  saveState();
+  updateScanningDynamic();
+}
+
+function addManual() {
+  const el = document.getElementById('manualNum');
+  const raw = toHalf(el.value);
+  if (!raw) return;
+  let fullId;
+  const m = raw.match(/^([A-Za-z])?\s*(\d{1,6})$/);
+  if (m) {
+    // 番号だけの入力（例：30007、T30007、T030007）→ 選んだ型番＋年度記号＋6桁ゼロ埋め
+    const year = m[1] ? m[1].toUpperCase() : YEAR_CODE;
+    fullId = manualPrefix + ' ' + year + m[2].padStart(6, '0');
+  } else {
+    fullId = raw.replace(/\s+/g, ' ');
+  }
+  addProductNumber(fullId, [fullId]);
+  el.value = '';
+  updateScanningDynamic();
+}
+
+function addProductNumber(num, boxGroup) {
+  if (ST.items.some(it => it.num === num)) { setFeedback('already'); return false; }
+  ST.items.push({ num: num, box: boxGroup });
+  saveState();
+  setFeedback('ok');
+  return true;
+}
+
+/* QRの中身：BOX:型番:番号,番号,...（例 BOX:RIII410mL:T030001,T030002,T030003） */
+function parseBoxCode(raw) {
+  const m = String(raw).trim().match(/^BOX:(.+)$/i);
+  if (!m) return null;
+  const rest = m[1];
+  const colonIdx = rest.indexOf(':');
+  let prefix = '';
+  let numsPart = rest;
+  if (colonIdx !== -1) { prefix = rest.substring(0, colonIdx).trim(); numsPart = rest.substring(colonIdx + 1); }
+  const nums = numsPart.split(',').map(s => s.trim()).filter(Boolean);
+  if (nums.length === 0) return null;
+  return { prefix: prefix, nums: nums };
+}
+
+function handleScannedCode(raw) {
+  const parsed = parseBoxCode(raw);
+  if (!parsed) {
+    setFeedback('ng');
+    showModal('登録されていないQRコードです', 'オパール化粧品の箱のシールのQRではありません。<br>シールが汚れているときは、下の欄に番号を手で入れてください。');
+    return;
+  }
+  const fullIds = parsed.nums.map(n => parsed.prefix ? (parsed.prefix + ' ' + n) : n);
+  let addedAny = false;
+  fullIds.forEach(id => {
+    if (!ST.items.some(it => it.num === id)) { ST.items.push({ num: id, box: fullIds }); addedAny = true; }
+  });
+  saveState();
+  setFeedback(addedAny ? 'ok' : 'already');
+  updateScanningDynamic();
+}
+
+/* ═════════════════════════════════════════════════════════
+   カメラスキャン（出荷紐付け画面と同じ仕組み）
+═════════════════════════════════════════════════════════ */
+let html5QrCode = null;
+let scanning = false;
+let lastScanCode = null;
+let pendingConfirmCode = null;
+let pendingConfirmCount = 0;
+const CONFIRM_THRESHOLD = 2;   // 同じQRを2回続けて読めたら採用（読み間違い防止）
+let lastFrameTime = Date.now();
+let isAutoRestarting = false;
+let missFrames = 0;
+const ALLOWED_MISS_FRAMES = 3;
+const QRBOX_SIZE = 250;
+const SCAN_FPS = 15;
+
+function calcQrbox(viewfinderWidth, viewfinderHeight) {
+  const shorter = Math.min(viewfinderWidth || 0, viewfinderHeight || 0);
+  let size = Math.floor(shorter * 0.8);
+  if (!size || size < 0) size = 150;
+  size = Math.min(size, QRBOX_SIZE);
+  size = Math.max(size, 120);
+  return { width: size, height: size };
+}
+
+function onScanSuccess(decodedText) {
+  lastFrameTime = Date.now();
+  missFrames = 0;
+  const code = decodedText.trim();
+  if (code === lastScanCode) { pendingConfirmCode = null; pendingConfirmCount = 0; return; }
+  if (code === pendingConfirmCode) { pendingConfirmCount++; } else { pendingConfirmCode = code; pendingConfirmCount = 1; }
+  if (pendingConfirmCount >= CONFIRM_THRESHOLD) {
+    lastScanCode = code; pendingConfirmCode = null; pendingConfirmCount = 0;
+    handleScannedCode(code);
+  }
+}
+function onScanFailure() {
+  lastFrameTime = Date.now();
+  missFrames++;
+  if (missFrames >= ALLOWED_MISS_FRAMES) { pendingConfirmCode = null; pendingConfirmCount = 0; missFrames = 0; }
+}
+
+async function toggleScanning() {
+  if (isAutoRestarting) return;
+  await resumeCtx(getAudioCtx());
+  if (scanning) { await stopScanning(); return; }
+  const readerEl = document.getElementById('reader');
+  const btn = document.getElementById('scanToggleBtn');
+  readerEl.classList.remove('hidden');
+  html5QrCode = new Html5Qrcode("reader");
+  try {
+    try {
+      await html5QrCode.start({ facingMode: "environment" }, { fps: SCAN_FPS, qrbox: calcQrbox }, onScanSuccess, onScanFailure);
+    } catch (e1) {
+      html5QrCode = new Html5Qrcode("reader");
+      await html5QrCode.start({ facingMode: "environment" }, { fps: SCAN_FPS }, onScanSuccess, onScanFailure);
+    }
+    scanning = true; lastFrameTime = Date.now(); missFrames = 0;
+    btn.textContent = '⏹ スキャン停止';
+    btn.classList.add('stop');
+  } catch (err) {
+    alert('カメラを起動できませんでした。\nカメラの使用を許可しているか確認してください。\n\nエラー: ' + err);
+    readerEl.classList.add('hidden');
+  }
+}
+
+async function stopScanning() {
+  if (html5QrCode) { try { await html5QrCode.stop(); await html5QrCode.clear(); } catch (e) {} }
+  scanning = false; lastScanCode = null; pendingConfirmCode = null; pendingConfirmCount = 0;
+  const readerEl = document.getElementById('reader');
+  if (readerEl) readerEl.classList.add('hidden');
+  const btn = document.getElementById('scanToggleBtn');
+  if (btn) { btn.textContent = '📷 スキャン開始'; btn.classList.remove('stop'); }
+}
+
+let wasScanningBeforeHide = false;
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) {
+    wasScanningBeforeHide = scanning;
+  } else if (wasScanningBeforeHide) {
+    wasScanningBeforeHide = false;
+    try { isAutoRestarting = true; await stopScanning(); await toggleScanning(); }
+    catch (e) {} finally { isAutoRestarting = false; }
+  }
+});
+
+setInterval(async () => {
+  if (!scanning || isAutoRestarting || document.hidden) return;
+  if (Date.now() - lastFrameTime > 8000) {
+    isAutoRestarting = true;
+    try { await stopScanning(); await toggleScanning(); } catch (e) {} finally { isAutoRestarting = false; }
+  }
+}, 3000);
+
+/* ═════════════════════════════════════════════════════════
+   出荷確定（このタイミングだけGASへ通信する）
+═════════════════════════════════════════════════════════ */
+async function confirmShipment() {
+  if (ST.items.length === 0) return;
+  if (!GAS_URL) { showModal('GAS_URLが未設定です', 'ファイルの GAS_URL に、デプロイしたウェブアプリのURLを設定してください。'); return; }
+  await stopScanning();
+  const s = store();
+  document.getElementById('app').innerHTML = `
+    <div class="card" style="text-align:center;padding:40px 16px;">
+      <div style="font-size:40px;margin-bottom:12px;">📡</div>
+      <div style="font-weight:700;">送信中...</div>
+    </div>`;
+
+  let res;
+  try {
+    res = await gasGet({
+      action: 'ship_confirm', code: AUTH.code, pin: AUTH.pin,
+      storeCode: ST.storeCode, shipDate: todayStr(), products: ST.items.map(it => it.num).join(',')
+    });
+  } catch (e) {
+    setFeedback('ng');
+    renderScanning();
+    showModal('通信できません', '電波の良い場所で、もう一度「出荷確定」を押してください。<br>読み取った内容は消えていません。');
+    return;
+  }
+
+  if (!res.success) {
+    setFeedback('ng');
+    if (res.error === 'duplicate') { renderDuplicateError(res.duplicates || []); return; }
+    if (res.error === 'auth') { showModal('暗証番号が変わりました', 'オパール化粧品からお知らせした、新しい暗証番号を入れてください。<br>読み取った内容は消えていません。'); renderLogin(); return; }
+    renderScanning();
+    showModal('送信できませんでした', esc(res.error || 'もう一度お試しください'));
+    return;
+  }
+
+  setFeedback('complete');
+  const count = ST.items.length;
+  clearState();
+  document.getElementById('app').innerHTML = `
+    ${agencyBar()}
+    <div class="result-card ok">
+      <span class="result-icon">🎉</span>
+      <div class="result-title">出荷確定しました</div>
+      <div class="result-msg">${esc(s ? s.name : '')}　${esc(todayStr())}<br>${count}本を記録しました</div>
+    </div>
+    <button class="btn-primary" onclick="renderStoreSelect()">次の販売店へ</button>`;
+}
+
+function renderDuplicateError(dups) {
+  const nums = dups.map(d => d.num);
+  document.getElementById('app').innerHTML = `
+    <div class="result-card error">
+      <span class="result-icon">⚠️</span>
+      <div class="result-title">すでに出荷済みの番号があります</div>
+      <div class="result-msg">次の番号は、前に別の出荷で記録されています。<br>箱を確かめて、出さない番号は「今回の出荷から外す」を押してから、もう一度確定してください。</div>
+    </div>
+    <div class="card">
+      <div class="card-title">出荷済みだった番号</div>
+      ${dups.map(d => `<div class="dup-item">${esc(d.num)}<small>前の出荷先：${esc(d.store)}</small></div>`).join('')}
+      <div style="font-size:12px;color:#5c6b77;margin-top:8px;line-height:1.6">「今回の出荷から外す」は、今スキャンした一覧から消すだけです。<b>前の出荷の記録は消えません。</b><br>同じ番号をもう一度スキャンすると、また この画面が出ます。<br>前の記録がまちがいのときは、オパール化粧品へご連絡ください。</div>
+    </div>
+    <button class="btn-primary" style="margin-bottom:8px" onclick='removeNumsAndReturn(${esc(JSON.stringify(nums))})'>今回の出荷から外す</button>
+    <button class="btn-reset" onclick="renderScanning()">一覧に戻る</button>`;
+}
+
+function removeNumsAndReturn(nums) {
+  ST.items = ST.items.filter(it => !nums.includes(it.num));
+  saveState();
+  renderScanning();
+}
+
+/* ─── 注意モーダル ───────────────────────────────── */
+function showModal(title, msg) {
+  document.getElementById('modal').innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="modal-icon">⚠️</div>
+        <div class="modal-title">${esc(title)}</div>
+        <div class="modal-msg">${msg}</div>
+        <button class="modal-btn" onclick="closeModal()">閉じる</button>
+      </div>
+    </div>`;
+}
+function closeModal() { document.getElementById('modal').innerHTML = ''; }
+
+async function resetAll() {
+  if (ST.items.length && !confirm('読み取った番号を全部消して、販売店を選ぶところに戻りますか？')) return;
+  await stopScanning();
+  clearState();
+  renderStoreSelect();
+}
+
+/* ═════════════════════════════════════════════════════════
+   起動
+═════════════════════════════════════════════════════════ */
+const APP_VERSION = 'v1.2 (2026-11-09)';
+document.getElementById('appVer').textContent = APP_VERSION;
+
+async function checkForUpdate() {
+  try {
+    const base = location.href.split('?')[0].split('#')[0];
+    const res = await fetch(base + '?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/const APP_VERSION = '([^']+)'/);
+    if (!m || m[1] === APP_VERSION) { sessionStorage.removeItem('agyUpdTried'); return; }
+    if (sessionStorage.getItem('agyUpdTried') === m[1]) return;
+    sessionStorage.setItem('agyUpdTried', m[1]);
+    location.replace(base + '?v=' + encodeURIComponent(m[1]));
+  } catch (e) {}
+}
+
+if (!AUTH.code || !AUTH.pin) {
+  renderLogin();
+} else if (ST.stage === 'scanning' && store()) {
+  renderScanning();
+} else {
+  renderStoreSelect();
+  refreshStores(true).then(() => { if (ST.stage !== 'scanning' && document.getElementById('storeList')) drawStoreList(); });
+}
+checkForUpdate();
+</script>
+</body>
+</html>
