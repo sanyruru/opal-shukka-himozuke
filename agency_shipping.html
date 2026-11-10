@@ -15,6 +15,8 @@
   ③ 箱のQRを読む（3個箱・6個箱どちらも同じ。読めなければ番号を手で入れる）
   ④「出荷確定」を押したときだけGASへ送る。その代理店様の中で同じ番号を2回出していないかを
      GAS側で確かめて、スプレッドシートに1本1行で残す
+  ⑤「記録を見る」で、その代理店様の記録だけを、日付ごと・販売店ごとに見る（v1.6）。
+     ロット番号で探す・Excel（CSV）に書き出すこともできる。GASの records が要る
 
   ★★★ 年が変わったら YEAR_CODE を直すこと（2026年＝T、2027年＝U）★★★
   （手入力で数字だけ打ったときに付ける記号。QRを読むときは関係ない）
@@ -151,6 +153,35 @@
   .dup-item { font-family: monospace; background: var(--red-pale); color: var(--red); padding: 4px 8px;
     border-radius: 6px; margin: 3px 0; font-size: 13px; }
   .dup-item small { font-family: sans-serif; display: block; font-size: 11px; color: #7a2a2a; }
+
+  /* 記録を見る */
+  .btn-records { width: 100%; padding: 14px; background: var(--surface); border: 2px solid var(--navy-light); border-radius: 12px;
+    font-size: 15px; font-weight: 700; color: var(--navy); cursor: pointer; margin-bottom: 12px; -webkit-appearance: none; }
+  .rec-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .rec-filter select, .rec-filter input, .rec-search input {
+    width: 100%; padding: 11px 10px; font-size: 15px; border-radius: 8px; border: 1.5px solid var(--navy-light);
+    background: var(--navy-pale); color: var(--navy); font-weight: 700; -webkit-appearance: none; appearance: none; min-width: 0; }
+  .rec-search { display: flex; gap: 8px; }
+  .rec-search input { flex: 1; background: var(--surface); color: var(--text); font-weight: 400; font-size: 16px; }
+  .rec-search button { padding: 0 16px; background: var(--navy); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; }
+  .rec-total { display: flex; justify-content: space-between; align-items: baseline; background: var(--green-pale);
+    border: 1.5px solid var(--green-light); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; color: var(--green); }
+  .rec-total b { font-size: 28px; font-family: monospace; }
+  .rec-total span { font-size: 12px; font-weight: 700; }
+  .rec-day { margin-bottom: 12px; }
+  .rec-day-head { display: flex; justify-content: space-between; font-size: 14px; font-weight: 900; color: var(--navy);
+    padding: 6px 2px; border-bottom: 2px solid var(--navy-light); margin-bottom: 6px; }
+  .rec-store { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; margin-bottom: 6px; }
+  .rec-store summary { list-style: none; display: flex; justify-content: space-between; align-items: center; padding: 12px; cursor: pointer;
+    font-size: 15px; font-weight: 700; }
+  .rec-store summary::-webkit-details-marker { display: none; }
+  .rec-store summary .cnt { font-family: monospace; color: var(--green); white-space: nowrap; }
+  .rec-store summary .cnt::after { content: ' ＞'; color: var(--muted); }
+  .rec-store[open] summary .cnt::after { content: ' ∨'; }
+  .rec-lots { padding: 0 12px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-family: monospace; font-size: 13px; }
+  .rec-hit { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; font-size: 14px; }
+  .rec-hit .lot { font-family: monospace; font-weight: 700; }
+  .rec-hit small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 
   #flash { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 50; opacity: 0; }
   #flash.ok  { animation: flashGreen 0.45s forwards; }
@@ -386,6 +417,7 @@ function renderStoreSelect() {
         </div>
       </div>
     </div>
+    <button class="btn-records" onclick="renderRecords()">📋 記録を見る</button>
     <div class="footer-links">
       <button class="btn-text" onclick="refreshStores(false)">販売店の一覧を最新にする</button>
       <button class="btn-text" onclick="logout()">代理店コードを入れ直す</button>
@@ -724,6 +756,139 @@ function removeNumsAndReturn(nums) {
   renderScanning();
 }
 
+/* ═════════════════════════════════════════════════════════
+   画面③：記録を見る（この代理店様の記録だけ。GASがほかの代理店様の分を返さない）
+═════════════════════════════════════════════════════════ */
+const REC = { period: 'thisMonth', from: '', to: '', store: '', lot: '', rows: [], more: false };
+
+function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function periodRange(p) {
+  const t = new Date(), y = t.getFullYear(), m = t.getMonth();
+  if (p === 'thisMonth') return [ymd(new Date(y, m, 1)), ymd(t)];
+  if (p === 'lastMonth') return [ymd(new Date(y, m - 1, 1)), ymd(new Date(y, m, 0))];
+  if (p === 'last3') return [ymd(new Date(y, m - 2, 1)), ymd(t)];
+  if (p === 'thisYear') return [ymd(new Date(y, 0, 1)), ymd(t)];
+  if (p === 'lastYear') return [ymd(new Date(y - 1, 0, 1)), ymd(new Date(y - 1, 11, 31))];
+  return [REC.from || ymd(new Date(y, m, 1)), REC.to || ymd(t)];  // 'custom'
+}
+function dateJa(s) {
+  const d = new Date(s + 'T00:00:00');
+  return isNaN(d) ? s : `${d.getMonth() + 1}/${d.getDate()}（${'日月火水木金土'[d.getDay()]}）`;
+}
+
+function renderRecords() {
+  const [from, to] = periodRange(REC.period);
+  const storeOpts = AUTH.stores.map(s => `<option value="${esc(s.code)}"${s.code === REC.store ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+  document.getElementById('app').innerHTML = `
+    ${agencyBar()}
+    <div class="card">
+      <div class="card-title">記録を見る</div>
+      <div class="rec-filter">
+        <select id="recPeriod" onchange="REC.period=this.value;REC.lot='';renderRecords()">
+          ${[['thisMonth', '今月'], ['lastMonth', '先月'], ['last3', '3か月'], ['thisYear', '今年'], ['lastYear', '去年'], ['custom', '日付を選ぶ']]
+            .map(([v, l]) => `<option value="${v}"${v === REC.period ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <select id="recStore" onchange="REC.store=this.value;drawRecords()">
+          <option value="">販売店：全部</option>${storeOpts}
+        </select>
+        ${REC.period === 'custom' ? `
+        <input type="date" id="recFrom" value="${esc(from)}" onchange="REC.from=this.value;loadRecords()">
+        <input type="date" id="recTo" value="${esc(to)}" onchange="REC.to=this.value;loadRecords()">` : ''}
+      </div>
+      <div class="rec-search">
+        <input id="recLot" type="text" placeholder="ロット番号で探す（例：900060）" value="${esc(REC.lot)}"
+          onkeydown="if(event.key==='Enter')searchLot()">
+        <button onclick="searchLot()">探す</button>
+      </div>
+    </div>
+    <div id="recBody"><div class="empty-list">読み込み中…</div></div>
+    <button class="btn-reset" onclick="downloadRecords()">⬇ Excelで開けるファイルに書き出す</button>
+    <button class="btn-primary" onclick="renderStoreSelect()">戻る</button>`;
+  if (REC.lot) searchLot(); else loadRecords();
+}
+
+async function loadRecords() {
+  REC.lot = '';
+  const [from, to] = periodRange(REC.period);
+  await fetchRecords({ from, to });
+}
+async function searchLot() {
+  const q = toHalf(document.getElementById('recLot').value || '').replace(/\s+/g, '');
+  if (!q) { loadRecords(); return; }
+  REC.lot = q;
+  await fetchRecords({ lot: q });
+}
+async function fetchRecords(params) {
+  const body = document.getElementById('recBody');
+  if (body) body.innerHTML = '<div class="empty-list">読み込み中…</div>';
+  try {
+    const res = await gasGet({ action: 'records', code: AUTH.code, pin: AUTH.pin, ...params });
+    if (!res.success) {
+      if (res.error === 'auth') { showModal('暗証番号が変わりました', 'オパール化粧品からお知らせした、新しい暗証番号を入れてください。'); renderLogin(); return; }
+      throw new Error(res.error);
+    }
+    REC.rows = res.rows || [];
+    REC.more = !!res.more;
+    drawRecords();
+  } catch (e) {
+    if (body) body.innerHTML = `<div class="empty-list">読み込めませんでした。電波の良い場所で、もう一度開いてください。</div>`;
+  }
+}
+
+function recShown() { return REC.rows.filter(r => !REC.store || r.s === REC.store); }
+
+function drawRecords() {
+  const body = document.getElementById('recBody');
+  if (!body) return;
+  const rows = recShown();
+  const storeName = REC.store ? ((AUTH.stores.find(s => s.code === REC.store) || {}).name || REC.store) : '';
+  const [from, to] = periodRange(REC.period);
+  const what = REC.lot ? `「${esc(REC.lot)}」を含む番号` : `${esc(dateJa(from))}〜${esc(dateJa(to))}`;
+  let html = `<div class="rec-total"><span>${what}${storeName ? '<br>' + esc(storeName) : ''}</span><span><b>${rows.length}</b> 本</span></div>`;
+  if (REC.more) html += `<div class="hint" style="margin-bottom:8px">記録が多いので、途中までを出しています。期間を短くしてください。</div>`;
+  if (!rows.length) {
+    body.innerHTML = html + `<div class="empty-list">${REC.lot ? '見つかりません。番号を確かめてください。' : 'この期間の記録はありません。'}</div>`;
+    return;
+  }
+  if (REC.lot) {
+    // 番号で探したとき：1本ずつ「いつ・どの店」
+    html += rows.slice().sort((a, b) => b.d.localeCompare(a.d))
+      .map(r => `<div class="rec-hit"><span class="lot">${esc(r.l)}</span><small>${esc(dateJa(r.d))}　${esc(r.n)}（店番号 ${esc(r.s)}）</small></div>`).join('');
+    body.innerHTML = html;
+    return;
+  }
+  // 日付ごと → 販売店ごと
+  const days = {};
+  rows.forEach(r => { ((days[r.d] = days[r.d] || {})[r.s + '\t' + r.n] = days[r.d][r.s + '\t' + r.n] || []).push(r.l); });
+  html += Object.keys(days).sort().reverse().map(d => {
+    const stores = days[d];
+    const total = Object.values(stores).reduce((a, l) => a + l.length, 0);
+    return `<div class="rec-day"><div class="rec-day-head"><span>${esc(dateJa(d))}</span><span>計 ${total}本</span></div>
+      ${Object.keys(stores).map(k => {
+        const lots = stores[k].slice().sort();
+        return `<details class="rec-store"><summary><span>${esc(k.split('\t')[1])}</span><span class="cnt">${lots.length}本</span></summary>
+          <div class="rec-lots">${lots.map(l => `<span>${esc(l)}</span>`).join('')}</div></details>`;
+      }).join('')}</div>`;
+  }).join('');
+  body.innerHTML = html;
+}
+
+/* Excel（CSV）に書き出す。Excelで文字化けしないよう、先頭にBOMを付ける */
+function downloadRecords() {
+  const rows = recShown().slice().sort((a, b) => a.d.localeCompare(b.d) || a.s.localeCompare(b.s) || a.l.localeCompare(b.l));
+  if (!rows.length) { showModal('書き出す記録がありません', '期間や販売店を変えてみてください。'); return; }
+  const cell = v => /[",\n]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  const csv = '﻿' + [['出荷日', '店番号', '店名', 'ロット番号']].concat(rows.map(r => [r.d, r.s, r.n, r.l]))
+    .map(r => r.map(cell).join(',')).join('\r\n');
+  const [from, to] = periodRange(REC.period);
+  const name = `出荷記録_${AUTH.name}_${REC.lot ? '番号' + REC.lot : from + '_' + to}.csv`.replace(/[\\/:*?"<>|()（）]/g, '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 /* ─── 注意モーダル ───────────────────────────────── */
 function showModal(title, msg) {
   document.getElementById('modal').innerHTML = `
@@ -748,7 +913,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.5 (2026-11-09)';
+const APP_VERSION = 'v1.6 (2026-11-10)';
 document.getElementById('appVer').textContent = APP_VERSION;
 
 async function checkForUpdate() {
