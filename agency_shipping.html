@@ -484,7 +484,7 @@ function renderScanning() {
       <div class="card-title">読み取ったロット番号</div>
       <div id="itemListWrap" class="item-list"></div>
       <div class="manual-add">
-        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シールか化粧箱に書いてある番号を入れてください。<br>例：T030007 → <b>30007</b>（Tと前の0は打たなくてOK）</div>
+        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シールか化粧箱に書いてある番号を入れてください。<br>例：T900007 → <b>900007</b>（Tは打たなくてOK。U000007 なら 7 でOK）</div>
         <div class="prefix-select-row">
           <label>品種を選ぶ（番号を手で入れるとき）</label>
           <select id="manualPrefixSelect" onchange="selectManualPrefix(this.value)">
@@ -492,7 +492,7 @@ function renderScanning() {
           </select>
         </div>
         <div class="manual-add-row">
-          <input id="manualNum" type="text" inputmode="text" placeholder="例：30007" maxlength="30">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：900007" maxlength="30">
           <button onclick="addManual()">追加</button>
         </div>
       </div>
@@ -540,7 +540,7 @@ function addManual() {
   let fullId;
   const m = raw.match(/^([A-Za-z])?\s*(\d{1,6})$/);
   if (m) {
-    // 番号だけの入力（例：30007、T30007、T030007）→ 選んだ型番＋年度記号＋6桁ゼロ埋め
+    // 番号だけの入力（例：900007、T900007、7）→ 選んだ型番＋年度記号＋6桁ゼロ埋め
     const year = m[1] ? m[1].toUpperCase() : YEAR_CODE;
     fullId = manualPrefix + ' ' + year + m[2].padStart(6, '0');
   } else {
@@ -559,7 +559,7 @@ function addProductNumber(num, boxGroup) {
   return true;
 }
 
-/* QRの中身：BOX:型番:番号,番号,...（例 BOX:RIII410mL:T030001,T030002,T030003） */
+/* QRの中身：BOX:型番:番号,番号,...（例 BOX:RIII410mL:T900001,T900002,T900003） */
 function parseBoxCode(raw) {
   const m = String(raw).trim().match(/^BOX:(.+)$/i);
   if (!m) return null;
@@ -913,7 +913,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.6 (2026-11-10)';
+const APP_VERSION = 'v1.7 (2026-11-11)';
 document.getElementById('appVer').textContent = APP_VERSION;
 
 async function checkForUpdate() {
