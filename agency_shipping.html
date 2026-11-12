@@ -178,7 +178,12 @@
   .rec-store summary .cnt { font-family: monospace; color: var(--green); white-space: nowrap; }
   .rec-store summary .cnt::after { content: ' ＞'; color: var(--muted); }
   .rec-store[open] summary .cnt::after { content: ' ∨'; }
-  .rec-lots { padding: 0 12px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-family: monospace; font-size: 13px; }
+  .rec-detail { padding: 0 12px 12px; }
+  .rec-lots { display: grid; grid-template-columns: 1fr; gap: 4px; font-family: monospace; font-size: 13px; margin-bottom: 6px; }
+  .rec-lots small { color: var(--muted); font-family: sans-serif; font-size: 11px; margin-left: 4px; }
+  .rec-sub { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--navy);
+    border-top: 1px dashed var(--border); padding: 8px 0 4px; }
+  .rec-sub:first-child { border-top: none; padding-top: 0; }
   .rec-hit { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; font-size: 14px; }
   .rec-hit .lot { font-family: monospace; font-weight: 700; }
   .rec-hit small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
@@ -193,7 +198,7 @@
 <body>
 
 <div class="header">
-  <div class="header-brand">オパール化粧品</div>
+  <div class="header-brand">株式会社三香堂</div>
   <div class="header-title">代理店出荷</div>
   <div class="header-ver" id="appVer"></div>
 </div>
@@ -315,7 +320,7 @@ function renderLogin() {
       <div class="field">
         <label>暗証番号</label>
         <input id="inPin" type="password" inputmode="numeric" maxlength="10" placeholder="6桁の数字">
-        <div class="hint">オパール化粧品からお知らせした番号です。このスマホが覚えるので、入れるのは最初の1回だけです。</div>
+        <div class="hint">株式会社三香堂からお知らせした番号です。このスマホが覚えるので、入れるのは最初の1回だけです。</div>
       </div>
       <div class="err" id="loginErr"></div>
     </div>
@@ -384,7 +389,7 @@ async function refreshStores(silent) {
   try {
     const res = await gasGet({ action: 'login', code: AUTH.code, pin: AUTH.pin });
     if (!res.success) {
-      if (res.error === 'auth') { showModal('暗証番号が変わりました', 'オパール化粧品からお知らせした、新しい暗証番号を入れてください。'); renderLogin(); }
+      if (res.error === 'auth') { showModal('暗証番号が変わりました', '株式会社三香堂からお知らせした、新しい暗証番号を入れてください。'); renderLogin(); }
       return;
     }
     AUTH.name = res.agencyName; AUTH.stores = res.stores || [];
@@ -577,7 +582,7 @@ function handleScannedCode(raw) {
   const parsed = parseBoxCode(raw);
   if (!parsed) {
     setFeedback('ng');
-    showModal('登録されていないQRコードです', 'オパール化粧品の箱のシールのQRではありません。<br>シールが汚れているときは、下の欄に番号を手で入れてください。');
+    showModal('登録されていないQRコードです', '薬用オパール・薬用オパールRⅢの箱のシールのQRではありません。<br>シールが汚れているときは、下の欄に番号を手で入れてください。');
     return;
   }
   const fullIds = parsed.nums.map(n => parsed.prefix ? (parsed.prefix + ' ' + n) : n);
@@ -714,7 +719,7 @@ async function confirmShipment() {
   if (!res.success) {
     setFeedback('ng');
     if (res.error === 'duplicate') { renderDuplicateError(res.duplicates || []); return; }
-    if (res.error === 'auth') { showModal('暗証番号が変わりました', 'オパール化粧品からお知らせした、新しい暗証番号を入れてください。<br>読み取った内容は消えていません。'); renderLogin(); return; }
+    if (res.error === 'auth') { showModal('暗証番号が変わりました', '株式会社三香堂からお知らせした、新しい暗証番号を入れてください。<br>読み取った内容は消えていません。'); renderLogin(); return; }
     renderScanning();
     showModal('送信できませんでした', esc(res.error || 'もう一度お試しください'));
     return;
@@ -744,7 +749,7 @@ function renderDuplicateError(dups) {
     <div class="card">
       <div class="card-title">出荷済みだった番号</div>
       ${dups.map(d => `<div class="dup-item">${esc(d.num)}<small>前の出荷先：${esc(d.store)}</small></div>`).join('')}
-      <div style="font-size:12px;color:#5c6b77;margin-top:8px;line-height:1.6">「今回の出荷から外す」は、今スキャンした一覧から消すだけです。<b>前の出荷の記録は消えません。</b><br>同じ番号をもう一度スキャンすると、また この画面が出ます。<br>前の記録がまちがいのときは、オパール化粧品へご連絡ください。</div>
+      <div style="font-size:12px;color:#5c6b77;margin-top:8px;line-height:1.6">「今回の出荷から外す」は、今スキャンした一覧から消すだけです。<b>前の出荷の記録は消えません。</b><br>同じ番号をもう一度スキャンすると、また この画面が出ます。<br>前の記録がまちがいのときは、株式会社三香堂へご連絡ください。</div>
     </div>
     <button class="btn-primary" style="margin-bottom:8px" onclick='removeNumsAndReturn(${esc(JSON.stringify(nums))})'>今回の出荷から外す</button>
     <button class="btn-reset" onclick="renderScanning()">一覧に戻る</button>`;
@@ -824,7 +829,7 @@ async function fetchRecords(params) {
   try {
     const res = await gasGet({ action: 'records', code: AUTH.code, pin: AUTH.pin, ...params });
     if (!res.success) {
-      if (res.error === 'auth') { showModal('暗証番号が変わりました', 'オパール化粧品からお知らせした、新しい暗証番号を入れてください。'); renderLogin(); return; }
+      if (res.error === 'auth') { showModal('暗証番号が変わりました', '株式会社三香堂からお知らせした、新しい暗証番号を入れてください。'); renderLogin(); return; }
       throw new Error(res.error);
     }
     REC.rows = res.rows || [];
@@ -857,20 +862,69 @@ function drawRecords() {
     body.innerHTML = html;
     return;
   }
-  // 日付ごと → 販売店ごと
-  const days = {};
-  rows.forEach(r => { ((days[r.d] = days[r.d] || {})[r.s + '\t' + r.n] = days[r.d][r.s + '\t' + r.n] || []).push(r.l); });
-  html += Object.keys(days).sort().reverse().map(d => {
-    const stores = days[d];
+  // 期間が長い（31日より長い）ときは「月ごと → 販売店ごと（中に日付）」、短いときは「日付ごと → 販売店ごと」
+  const byMonth = (new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 86400000 > 31;
+  const groups = {};
+  rows.forEach(r => {
+    const g = byMonth ? r.d.slice(0, 7) : r.d;
+    const k = r.s + '\t' + r.n;
+    ((groups[g] = groups[g] || {})[k] = groups[g][k] || []).push(r);
+  });
+  if (byMonth) html += `<div class="hint" style="margin-bottom:8px">期間が長いので、月ごとにまとめています。販売店をタップすると、日付ごとの本数と番号が出ます。</div>`;
+  html += Object.keys(groups).sort().reverse().map(g => {
+    const stores = groups[g];
     const total = Object.values(stores).reduce((a, l) => a + l.length, 0);
-    return `<div class="rec-day"><div class="rec-day-head"><span>${esc(dateJa(d))}</span><span>計 ${total}本</span></div>
+    const head = byMonth ? `${g.slice(0, 4)}年${Number(g.slice(5, 7))}月` : dateJa(g);
+    return `<div class="rec-day"><div class="rec-day-head"><span>${esc(head)}</span><span>計 ${total}本</span></div>
       ${Object.keys(stores).map(k => {
-        const lots = stores[k].slice().sort();
-        return `<details class="rec-store"><summary><span>${esc(k.split('\t')[1])}</span><span class="cnt">${lots.length}本</span></summary>
-          <div class="rec-lots">${lots.map(l => `<span>${esc(l)}</span>`).join('')}</div></details>`;
+        const list = stores[k];
+        let inner;
+        if (byMonth) {
+          const days = {};
+          list.forEach(r => (days[r.d] = days[r.d] || []).push(r.l));
+          inner = Object.keys(days).sort().reverse().map(d =>
+            `<div class="rec-sub"><span>${esc(dateJa(d))}</span><span>${days[d].length}本</span></div>${lotRangesHtml(days[d])}`).join('');
+        } else {
+          inner = lotRangesHtml(list.map(r => r.l));
+        }
+        return `<details class="rec-store"><summary><span>${esc(k.split('\t')[1])}</span><span class="cnt">${list.length}本</span></summary>
+          <div class="rec-detail">${inner}</div></details>`;
       }).join('')}</div>`;
   }).join('');
   body.innerHTML = html;
+}
+
+/* 続いている番号を1行に縮める：RIII410mL T900001〜T900030（30本） */
+function lotRanges(lots) {
+  const parsed = [], other = [];
+  lots.forEach(l => {
+    const m = /^(.*?)\s*([A-Z])(\d+)$/.exec(String(l).trim());
+    if (m) parsed.push({ t: m[1], c: m[2], n: Number(m[3]), w: m[3].length }); else other.push(String(l));
+  });
+  parsed.sort((a, b) => a.t.localeCompare(b.t) || a.c.localeCompare(b.c) || a.n - b.n);
+  const out = [];
+  let cur = null;
+  const fmt = (c, n, w) => c + String(n).padStart(w, '0');
+  const flush = () => {
+    if (!cur) return;
+    const pre = cur.t ? cur.t + ' ' : '';
+    const cnt = cur.end - cur.start + 1;
+    out.push(cnt === 1 ? { text: pre + fmt(cur.c, cur.start, cur.w), cnt }
+      : { text: `${pre}${fmt(cur.c, cur.start, cur.w)}〜${fmt(cur.c, cur.end, cur.w)}`, cnt });
+  };
+  parsed.forEach(p => {
+    if (cur && cur.t === p.t && cur.c === p.c && p.n === cur.end + 1) { cur.end = p.n; return; }
+    if (cur && cur.t === p.t && cur.c === p.c && p.n === cur.end) return;  // 同じ番号が2回あれば1つに
+    flush();
+    cur = { t: p.t, c: p.c, start: p.n, end: p.n, w: p.w };
+  });
+  flush();
+  other.sort().forEach(l => out.push({ text: l, cnt: 1 }));
+  return out;
+}
+function lotRangesHtml(lots) {
+  return `<div class="rec-lots">${lotRanges(lots).map(r =>
+    `<div>${esc(r.text)}${r.cnt > 1 ? `<small>（${r.cnt}本）</small>` : ''}</div>`).join('')}</div>`;
 }
 
 /* Excel（CSV）に書き出す。Excelで文字化けしないよう、先頭にBOMを付ける */
@@ -913,7 +967,7 @@ async function resetAll() {
 /* ═════════════════════════════════════════════════════════
    起動
 ═════════════════════════════════════════════════════════ */
-const APP_VERSION = 'v1.7 (2026-11-11)';
+const APP_VERSION = 'v1.9 (2026-11-12)';
 document.getElementById('appVer').textContent = APP_VERSION;
 
 async function checkForUpdate() {
