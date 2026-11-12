@@ -489,7 +489,7 @@ function renderScanning() {
       <div class="card-title">読み取ったロット番号</div>
       <div id="itemListWrap" class="item-list"></div>
       <div class="manual-add">
-        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シールか化粧箱に書いてある番号を入れてください。<br>例：T900007 → <b>900007</b>（Tは打たなくてOK。U000007 なら 7 でOK）</div>
+        <div class="hint" style="margin-bottom:6px;">QRが読めないときは、シールか化粧箱に書いてある番号を入れてください。<br>例：T090007 → <b>90007</b>（Tは打たなくてOK。U000007 なら 7 でOK）</div>
         <div class="prefix-select-row">
           <label>品種を選ぶ（番号を手で入れるとき）</label>
           <select id="manualPrefixSelect" onchange="selectManualPrefix(this.value)">
@@ -497,7 +497,7 @@ function renderScanning() {
           </select>
         </div>
         <div class="manual-add-row">
-          <input id="manualNum" type="text" inputmode="text" placeholder="例：900007" maxlength="30">
+          <input id="manualNum" type="text" inputmode="text" placeholder="例：90007" maxlength="30">
           <button onclick="addManual()">追加</button>
         </div>
       </div>
@@ -545,7 +545,7 @@ function addManual() {
   let fullId;
   const m = raw.match(/^([A-Za-z])?\s*(\d{1,6})$/);
   if (m) {
-    // 番号だけの入力（例：900007、T900007、7）→ 選んだ型番＋年度記号＋6桁ゼロ埋め
+    // 番号だけの入力（例：90007、T090007、7）→ 選んだ型番＋年度記号＋6桁ゼロ埋め
     const year = m[1] ? m[1].toUpperCase() : YEAR_CODE;
     fullId = manualPrefix + ' ' + year + m[2].padStart(6, '0');
   } else {
@@ -564,7 +564,7 @@ function addProductNumber(num, boxGroup) {
   return true;
 }
 
-/* QRの中身：BOX:型番:番号,番号,...（例 BOX:RIII410mL:T900001,T900002,T900003） */
+/* QRの中身：BOX:型番:番号,番号,...（例 BOX:RIII410mL:T090001,T090002,T090003） */
 function parseBoxCode(raw) {
   const m = String(raw).trim().match(/^BOX:(.+)$/i);
   if (!m) return null;
@@ -801,7 +801,7 @@ function renderRecords() {
         <input type="date" id="recTo" value="${esc(to)}" onchange="REC.to=this.value;loadRecords()">` : ''}
       </div>
       <div class="rec-search">
-        <input id="recLot" type="text" placeholder="ロット番号で探す（例：900060）" value="${esc(REC.lot)}"
+        <input id="recLot" type="text" placeholder="ロット番号で探す（例：90060）" value="${esc(REC.lot)}"
           onkeydown="if(event.key==='Enter')searchLot()">
         <button onclick="searchLot()">探す</button>
       </div>
@@ -894,7 +894,7 @@ function drawRecords() {
   body.innerHTML = html;
 }
 
-/* 続いている番号を1行に縮める：RIII410mL T900001〜T900030（30本） */
+/* 続いている番号を1行に縮める：RIII410mL T090001〜T090030（30本） */
 function lotRanges(lots) {
   const parsed = [], other = [];
   lots.forEach(l => {
